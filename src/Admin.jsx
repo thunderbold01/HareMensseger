@@ -1,1070 +1,1094 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { adminService, cryptoService } from './services/api';
-import { Line, Doughnut, Bar, Scatter } from 'react-chartjs-2';
-import {
-    Chart as ChartJS,
-    CategoryScale,
-    LinearScale,
-    PointElement,
-    LineElement,
-    BarElement,
-    ArcElement,
-    Title,
-    Tooltip,
-    Legend,
-    Filler,
-    RadialLinearScale
-} from 'chart.js';
+import { authService, userService, chatService } from './services/api';
+import Admin from './Admin';
 
-ChartJS.register(
-    CategoryScale, LinearScale, PointElement, LineElement, 
-    BarElement, ArcElement, RadialLinearScale, Title, Tooltip, Legend, Filler
-);
+// ===== SISTEMA DE PUSH NOTIFICATIONS =====
+class PushManager {
+  constructor() {
+    this.swRegistration = null;
+    this.vapidPublicKey = null;
+  }
 
-// ===== ESTILOS AVANÇADOS =====
-const styles = {
-    container: {
-        minHeight: '100vh',
-        backgroundColor: '#0a0e17',
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace',
-        color: '#e0e0e0'
-    },
-    header: {
-        background: 'linear-gradient(135deg, #0d1117 0%, #161b22 100%)',
-        padding: '12px 24px',
-        borderBottom: '2px solid #e53935',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        position: 'sticky',
-        top: 0,
-        zIndex: 1000,
-        boxShadow: '0 4px 20px rgba(229, 57, 53, 0.2)'
-    },
-    logo: { display: 'flex', alignItems: 'center', gap: '12px' },
-    logoIcon: { fontSize: '32px', filter: 'drop-shadow(0 0 10px rgba(229, 57, 53, 0.5))' },
-    logoText: { 
-        fontSize: '22px', 
-        fontWeight: 'bold', 
-        background: 'linear-gradient(135deg, #e53935, #ff6f00)',
-        WebkitBackgroundClip: 'text',
-        WebkitTextFillColor: 'transparent'
-    },
-    adminBadge: {
-        background: 'linear-gradient(135deg, #e53935, #c62828)',
-        color: 'white',
-        padding: '4px 14px',
-        borderRadius: '20px',
-        fontSize: '11px',
-        fontWeight: 'bold',
-        letterSpacing: '1px',
-        boxShadow: '0 0 15px rgba(229, 57, 53, 0.3)'
-    },
-    main: { maxWidth: '1920px', margin: '0 auto', padding: '20px' },
+  async init() {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+      console.log('Push notifications não suportadas');
+      return false;
+    }
+
+    try {
+      // Registrar Service Worker
+      this.swRegistration = await navigator.serviceWorker.register('/sw.js');
+      console.log('Service Worker registrado');
+      
+      // Buscar VAPID key do backend
+      const response = await fetch('/api/push/vapid-key');
+      const data = await response.json();
+      this.vapidPublicKey = data.publicKey;
+      
+      return true;
+    } catch (error) {
+      console.error('Erro ao inicializar push:', error);
+      return false;
+    }
+  }
+
+  async checkSubscription() {
+    if (!this.swRegistration) return false;
     
-    // Grid de Status do Servidor
-    serverGrid: {
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-        gap: '16px',
-        marginBottom: '24px'
-    },
-    serverCard: (status) => ({
-        background: 'linear-gradient(135deg, #161b22 0%, #0d1117 100%)',
-        borderRadius: '12px',
-        padding: '20px',
-        border: `1px solid ${status === 'ok' ? '#238636' : status === 'warning' ? '#d2991d' : '#da3633'}`,
-        position: 'relative',
-        overflow: 'hidden',
-        boxShadow: `0 0 20px ${status === 'ok' ? 'rgba(35,134,54,0.2)' : status === 'warning' ? 'rgba(210,153,29,0.2)' : 'rgba(218,54,51,0.2)'}`
-    }),
-    serverTitle: {
-        fontSize: '13px',
-        fontWeight: '600',
-        color: '#8b949e',
-        marginBottom: '12px',
-        textTransform: 'uppercase',
-        letterSpacing: '1px'
-    },
-    serverValue: {
-        fontSize: '32px',
-        fontWeight: 'bold',
-        color: '#ffffff',
-        marginBottom: '8px'
-    },
-    serverDetail: {
-        fontSize: '11px',
-        color: '#8b949e',
-        lineHeight: '1.6'
-    },
-    
-    // Grid de Métricas
-    metricsGrid: {
-        display: 'grid',
-        gridTemplateColumns: 'repeat(6, 1fr)',
-        gap: '12px',
-        marginBottom: '24px'
-    },
-    metricCard: {
-        background: 'linear-gradient(135deg, #161b22 0%, #0d1117 100%)',
-        borderRadius: '12px',
-        padding: '16px',
-        border: '1px solid #30363d',
-        transition: 'all 0.3s ease',
-        cursor: 'pointer',
-        ':hover': {
-            transform: 'translateY(-2px)',
-            boxShadow: '0 8px 25px rgba(0,0,0,0.3)'
-        }
-    },
-    metricIcon: { fontSize: '28px', marginBottom: '10px' },
-    metricValue: { 
-        fontSize: '28px', 
-        fontWeight: 'bold', 
-        background: 'linear-gradient(135deg, #e53935, #ff6f00)',
-        WebkitBackgroundClip: 'text',
-        WebkitTextFillColor: 'transparent'
-    },
-    metricLabel: { fontSize: '11px', color: '#8b949e', marginTop: '6px', textTransform: 'uppercase' },
-    metricChange: (positive) => ({
-        fontSize: '11px',
-        color: positive ? '#238636' : '#da3633',
-        marginTop: '8px',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '4px'
-    }),
-    
-    // Gráficos
-    chartsGrid: {
-        display: 'grid',
-        gridTemplateColumns: '2fr 1fr',
-        gap: '16px',
-        marginBottom: '24px'
-    },
-    chartCard: {
-        background: 'linear-gradient(135deg, #161b22 0%, #0d1117 100%)',
-        borderRadius: '12px',
-        padding: '20px',
-        border: '1px solid #30363d'
-    },
-    chartTitle: {
-        fontSize: '14px',
-        fontWeight: '600',
-        color: '#ffffff',
-        marginBottom: '16px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between'
-    },
-    
-    // Seções
-    section: {
-        background: 'linear-gradient(135deg, #161b22 0%, #0d1117 100%)',
-        borderRadius: '12px',
-        padding: '20px',
-        marginBottom: '24px',
-        border: '1px solid #30363d'
-    },
-    sectionTitle: {
-        fontSize: '16px',
-        fontWeight: '600',
-        color: '#ffffff',
-        marginBottom: '16px',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center'
-    },
-    
-    // Tabelas
-    tableWrapper: { maxHeight: '400px', overflowY: 'auto', borderRadius: '8px' },
-    table: { width: '100%', borderCollapse: 'collapse' },
-    th: {
-        textAlign: 'left',
-        padding: '12px',
-        background: '#0d1117',
-        fontSize: '11px',
-        fontWeight: '600',
-        color: '#8b949e',
-        borderBottom: '2px solid #30363d',
-        textTransform: 'uppercase',
-        letterSpacing: '0.5px',
-        position: 'sticky',
-        top: 0,
-        zIndex: 1
-    },
-    td: {
-        padding: '12px',
-        borderBottom: '1px solid #21262d',
-        fontSize: '13px',
-        color: '#c9d1d9'
-    },
-    
-    // Badges
-    badge: (type) => ({
-        display: 'inline-block',
-        padding: '4px 10px',
-        borderRadius: '12px',
-        fontSize: '10px',
-        fontWeight: '600',
-        textTransform: 'uppercase',
-        letterSpacing: '0.5px',
-        background: type === 'success' ? '#238636' : 
-                   type === 'warning' ? '#9e6a03' : 
-                   type === 'danger' ? '#da3633' : '#1f6feb',
-        color: 'white'
-    }),
-    
-    // Botões
-    btn: (type = 'primary') => ({
-        padding: '8px 16px',
-        background: type === 'primary' ? 'linear-gradient(135deg, #e53935, #c62828)' :
-                   type === 'success' ? '#238636' :
-                   type === 'warning' ? '#9e6a03' : '#30363d',
-        color: 'white',
-        border: 'none',
-        borderRadius: '6px',
-        fontSize: '12px',
-        fontWeight: '600',
-        cursor: 'pointer',
-        transition: 'all 0.2s ease',
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: '6px',
-        boxShadow: type === 'primary' ? '0 4px 15px rgba(229, 57, 53, 0.3)' : 'none'
-    }),
-    
-    // Live Indicator
-    liveIndicator: {
-        display: 'flex',
-        alignItems: 'center',
-        gap: '8px',
-        padding: '6px 12px',
-        background: '#0d1117',
-        borderRadius: '20px',
-        border: '1px solid #30363d'
-    },
-    pulse: {
-        width: '10px',
-        height: '10px',
-        borderRadius: '50%',
-        background: '#4caf50',
-        boxShadow: '0 0 10px rgba(76, 175, 80, 0.5)'
-    },
-    
-    // Log Console
-    console: {
-        background: '#0d1117',
-        borderRadius: '8px',
-        padding: '16px',
-        fontFamily: 'monospace',
-        fontSize: '12px',
-        maxHeight: '300px',
-        overflowY: 'auto',
-        border: '1px solid #30363d'
-    },
-    logLine: (type) => ({
-        padding: '4px 0',
-        color: type === 'error' ? '#da3633' : 
-               type === 'warning' ? '#d2991d' : 
-               type === 'success' ? '#238636' : '#8b949e',
-        borderBottom: '1px solid #21262d'
-    })
-};
+    try {
+      const subscription = await this.swRegistration.pushManager.getSubscription();
+      return !!subscription;
+    } catch (error) {
+      console.error('Erro ao verificar subscription:', error);
+      return false;
+    }
+  }
 
-// ===== COMPONENTE ADMIN AVANÇADO =====
-function Admin() {
-    // Estados
-    const [stats, setStats] = useState({
-        total_usuarios: 0, online: 0, total_mensagens: 0,
-        mensagens_24h: 0, conversas_ativas: 0, total_amizades: 0,
-        solicitacoes_pendentes: 0, total_chaves: 0
-    });
-    const [serverMetrics, setServerMetrics] = useState({
-        cpu: 0, memory: 0, disk: 0, uptime: '0h',
-        requests_per_sec: 0, active_connections: 0,
-        network_in: 0, network_out: 0
-    });
-    const [usuarios, setUsuarios] = useState([]);
-    const [mensagens, setMensagens] = useState([]);
-    const [chaves, setChaves] = useState([]);
-    const [logs, setLogs] = useState([]);
-    const [securityLogs, setSecurityLogs] = useState([]);
-    const [cryptoStatus, setCryptoStatus] = useState(null);
-    const [tlsHandshakes, setTlsHandshakes] = useState([]);
-    const [websocketStatus, setWebsocketStatus] = useState('connected');
-    const [estatisticas, setEstatisticas] = useState({ 
-        por_hora: [], 
-        por_algoritmo: [],
-        latencia_media: 0 
-    });
-    const [messageStats, setMessageStats] = useState({ 
-        por_usuario: [], 
-        por_algoritmo: [] 
-    });
-    
-    const [loading, setLoading] = useState(true);
-    const [isLive, setIsLive] = useState(true);
-    const [lastUpdate, setLastUpdate] = useState(new Date());
-    const [updateCount, setUpdateCount] = useState(0);
-    const [activeTab, setActiveTab] = useState('overview');
-    const [selectedUser, setSelectedUser] = useState(null);
-    
-    const wsRef = useRef(null);
-    const intervalRef = useRef(null);
-    const consoleRef = useRef(null);
+  async requestPermission() {
+    try {
+      const permission = await Notification.requestPermission();
+      
+      if (permission === 'granted') {
+        return { success: true, permission };
+      } else {
+        return { success: false, permission };
+      }
+    } catch (error) {
+      console.error('Erro ao solicitar permissão:', error);
+      return { success: false, permission: 'denied' };
+    }
+  }
 
-    // ===== CONEXÃO WEBSOCKET =====
-    const connectWebSocket = useCallback(() => {
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}/ws/admin/`;
-        
-        try {
-            const ws = new WebSocket(wsUrl);
-            
-            ws.onopen = () => {
-                console.log('WebSocket conectado');
-                setWebsocketStatus('connected');
-                ws.send(JSON.stringify({ 
-                    type: 'subscribe', 
-                    channels: ['messages', 'users', 'crypto', 'server'] 
-                }));
-            };
-            
-            ws.onmessage = (event) => {
-                const data = JSON.parse(event.data);
-                handleWebSocketMessage(data);
-            };
-            
-            ws.onerror = (error) => {
-                console.error('WebSocket error:', error);
-                setWebsocketStatus('error');
-            };
-            
-            ws.onclose = () => {
-                console.log('WebSocket desconectado, reconectando...');
-                setWebsocketStatus('disconnected');
-                setTimeout(connectWebSocket, 3000);
-            };
-            
-            wsRef.current = ws;
-        } catch (error) {
-            console.log('WebSocket não disponível, usando polling');
-            setWebsocketStatus('polling');
-        }
-    }, []);
+  async subscribeUser() {
+    if (!this.swRegistration || !this.vapidPublicKey) {
+      throw new Error('Push Manager não inicializado');
+    }
 
-    const handleWebSocketMessage = (data) => {
-        switch(data.type) {
-            case 'new_message':
-                setMensagens(prev => [data.message, ...prev].slice(0, 100));
-                addSecurityLog('Mensagem enviada', 'info', data.message);
-                break;
-            case 'user_status':
-                setUsuarios(prev => prev.map(u => 
-                    u.id === data.user.id ? { ...u, ...data.user } : u
-                ));
-                break;
-            case 'server_metrics':
-                setServerMetrics(data.metrics);
-                break;
-            case 'tls_handshake':
-                setTlsHandshakes(prev => [data.handshake, ...prev].slice(0, 50));
-                break;
-            case 'crypto_operation':
-                addSecurityLog(`Operação criptográfica: ${data.operation}`, 'success');
-                break;
-            default:
-                break;
-        }
-    };
+    try {
+      const subscription = await this.swRegistration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: this.urlBase64ToUint8Array(this.vapidPublicKey)
+      });
 
-    const addSecurityLog = (message, type = 'info', data = null) => {
-        const log = {
-            id: Date.now(),
-            timestamp: new Date().toISOString(),
-            message,
-            type,
-            data
-        };
-        setSecurityLogs(prev => [log, ...prev].slice(0, 100));
-    };
-
-    // ===== INICIALIZAÇÃO =====
-    useEffect(() => {
-        connectWebSocket();
-        loadAllData();
-        
-        intervalRef.current = setInterval(() => {
-            if (isLive) {
-                loadAllData();
-                setUpdateCount(prev => prev + 1);
-                simulateServerMetrics();
-            }
-        }, 2000);
-        
-        return () => {
-            if (intervalRef.current) clearInterval(intervalRef.current);
-            if (wsRef.current) wsRef.current.close();
-        };
-    }, [isLive]);
-
-    const simulateServerMetrics = () => {
-        setServerMetrics(prev => ({
-            cpu: Math.min(100, Math.max(0, prev.cpu + (Math.random() - 0.5) * 5)),
-            memory: Math.min(100, Math.max(0, prev.memory + (Math.random() - 0.5) * 3)),
-            disk: 45 + Math.random() * 2,
-            uptime: formatUptime(Date.now() - 3600000),
-            requests_per_sec: Math.floor(10 + Math.random() * 20),
-            active_connections: Math.floor(5 + Math.random() * 15),
-            network_in: Math.floor(100 + Math.random() * 50),
-            network_out: Math.floor(80 + Math.random() * 40)
-        }));
-    };
-
-    const loadAllData = async () => {
-        try {
-            const startTime = performance.now();
-            
-            const results = await Promise.allSettled([
-                adminService.getStats(),
-                adminService.getUsuarios(),
-                adminService.getMensagens(),
-                adminService.getChaves(),
-                adminService.getLogs(),
-                adminService.getEstatisticas(),
-                cryptoService.testCrypto()
-            ]);
-            
-            const endTime = performance.now();
-            const latency = endTime - startTime;
-            
-            results.forEach((result, index) => {
-                if (result.status === 'fulfilled') {
-                    const data = result.value.data;
-                    switch(index) {
-                        case 0: setStats(data); break;
-                        case 1: setUsuarios(data.usuarios || []); break;
-                        case 2: 
-                            setMensagens(data.mensagens || []); 
-                            calcularEstatisticas(data.mensagens || []);
-                            break;
-                        case 3: setChaves(data.chaves || []); break;
-                        case 4: setLogs(data.logs || []); break;
-                        case 5: setEstatisticas(data); break;
-                        case 6: setCryptoStatus(data); break;
-                    }
-                }
-            });
-            
-            setLastUpdate(new Date());
-            setLoading(false);
-            
-            addSecurityLog(`Dados carregados em ${latency.toFixed(2)}ms`, 'success');
-            
-        } catch (err) {
-            console.error('Erro ao carregar dados:', err);
-            addSecurityLog('Erro ao carregar dados do servidor', 'error');
-        }
-    };
-
-    const calcularEstatisticas = (mensagens) => {
-        const userCount = {};
-        const algoCount = {};
-        
-        mensagens.forEach(m => {
-            userCount[m.remetente] = (userCount[m.remetente] || 0) + 1;
-            algoCount[m.algoritmo] = (algoCount[m.algoritmo] || 0) + 1;
-        });
-        
-        const por_usuario = Object.entries(userCount)
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 10)
-            .map(([user, count]) => ({ user, count }));
-        
-        const por_algoritmo = Object.entries(algoCount)
-            .map(([algo, count]) => ({ algoritmo: algo, count }));
-        
-        setMessageStats({ por_usuario, por_algoritmo });
-    };
-
-    // ===== AÇÕES =====
-    const handleForcarLogout = async (userId) => {
-        try {
-            await adminService.forcarLogout(userId);
-            addSecurityLog(`Logout forçado para usuário ${userId}`, 'warning');
-            loadAllData();
-        } catch (err) {
-            addSecurityLog(`Falha ao forçar logout: ${err.message}`, 'error');
-        }
-    };
-
-    const handleForcarTodosOffline = async () => {
-        const onlineUsers = usuarios.filter(u => u.online);
-        for (const user of onlineUsers) {
-            try {
-                await adminService.forcarLogout(user.id);
-            } catch (err) {}
-        }
-        addSecurityLog(`${onlineUsers.length} usuários forçados offline`, 'warning');
-        loadAllData();
-    };
-
-    const handleRevogarChaves = async (userId) => {
-        try {
-            await adminService.revogarChaves(userId);
-            addSecurityLog(`Chaves revogadas para usuário ${userId}`, 'warning');
-            loadAllData();
-        } catch (err) {
-            addSecurityLog(`Falha ao revogar chaves: ${err.message}`, 'error');
-        }
-    };
-
-    const handleLimparLogs = async () => {
-        try {
-            await adminService.limparLogs();
-            addSecurityLog('Logs do sistema limpos', 'warning');
-            loadAllData();
-        } catch (err) {
-            addSecurityLog(`Falha ao limpar logs: ${err.message}`, 'error');
-        }
-    };
-
-    const handleBackup = async () => {
-        try {
-            await adminService.criarBackup();
-            addSecurityLog('Backup do sistema criado com sucesso', 'success');
-        } catch (err) {
-            addSecurityLog(`Falha ao criar backup: ${err.message}`, 'error');
-        }
-    };
-
-    const handleLogout = () => {
-        localStorage.clear();
-        window.location.href = '/';
-    };
-
-    // ===== UTILITÁRIOS =====
-    const formatUptime = (ms) => {
-        const hours = Math.floor(ms / 3600000);
-        const minutes = Math.floor((ms % 3600000) / 60000);
-        return `${hours}h ${minutes}m`;
-    };
-
-    const formatBytes = (bytes) => {
-        if (bytes === 0) return '0 B';
-        const k = 1024;
-        const sizes = ['B', 'KB', 'MB', 'GB'];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-    };
-
-    // ===== DADOS DOS GRÁFICOS =====
-    const messageChartData = {
-        labels: estatisticas.por_hora?.map(h => h.hora) || [],
-        datasets: [{
-            label: 'Mensagens por Hora',
-            data: estatisticas.por_hora?.map(h => h.count) || [],
-            borderColor: '#e53935',
-            backgroundColor: 'rgba(229, 57, 53, 0.1)',
-            borderWidth: 2,
-            fill: true,
-            tension: 0.4,
-            pointRadius: 3,
-            pointBackgroundColor: '#e53935'
-        }]
-    };
-
-    const cryptoChartData = {
-        labels: messageStats.por_algoritmo?.map(a => a.algoritmo) || [],
-        datasets: [{
-            data: messageStats.por_algoritmo?.map(a => a.count) || [],
-            backgroundColor: ['#e53935', '#1f6feb', '#238636', '#9e6a03', '#6e40c9'],
-            borderWidth: 2,
-            borderColor: '#0d1117'
-        }]
-    };
-
-    const serverLoadData = {
-        labels: ['1m', '2m', '3m', '4m', '5m', '6m', '7m', '8m', '9m', '10m'],
-        datasets: [
-            {
-                label: 'CPU %',
-                data: Array.from({length: 10}, () => 20 + Math.random() * 40),
-                borderColor: '#e53935',
-                backgroundColor: 'transparent',
-                borderWidth: 2,
-                tension: 0.4
-            },
-            {
-                label: 'Memória %',
-                data: Array.from({length: 10}, () => 40 + Math.random() * 20),
-                borderColor: '#1f6feb',
-                backgroundColor: 'transparent',
-                borderWidth: 2,
-                tension: 0.4
-            }
-        ]
-    };
-
-    const chartOptions = {
-        responsive: true,
-        maintainAspectRatio: false,
-        animation: { duration: 500 },
-        plugins: {
-            legend: { 
-                display: true, 
-                labels: { color: '#8b949e', font: { size: 11 } } 
-            },
+      // Enviar subscription para o backend
+      const token = localStorage.getItem('token');
+      await fetch('/api/push/subscribe', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
         },
-        scales: {
-            y: {
-                grid: { color: '#21262d' },
-                ticks: { color: '#8b949e', font: { size: 10 } },
-                beginAtZero: true
-            },
-            x: {
-                grid: { display: false },
-                ticks: { color: '#8b949e', font: { size: 10 } }
-            }
-        }
-    };
+        body: JSON.stringify({
+          endpoint: subscription.endpoint,
+          keys: {
+            p256dh: btoa(String.fromCharCode(...new Uint8Array(subscription.getKey('p256dh')))),
+            auth: btoa(String.fromCharCode(...new Uint8Array(subscription.getKey('auth'))))
+          }
+        })
+      });
 
-    return (
-        <div style={styles.container}>
-            {/* HEADER */}
-            <header style={styles.header}>
-                <div style={styles.logo}>
-                    <span style={styles.logoIcon}>🛡️</span>
-                    <span style={styles.logoText}>CipherChat Admin</span>
-                    <span style={styles.adminBadge}>MONITOR</span>
-                </div>
-                
-                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                    {/* Live Status */}
-                    <div style={styles.liveIndicator}>
-                        <span style={{
-                            ...styles.pulse,
-                            animation: isLive ? 'pulse 1s infinite' : 'none',
-                            background: websocketStatus === 'connected' ? '#4caf50' : 
-                                      websocketStatus === 'polling' ? '#d2991d' : '#da3633'
-                        }}></span>
-                        <span style={{ color: '#8b949e', fontSize: '11px' }}>
-                            {websocketStatus === 'connected' ? 'WS LIVE' : 
-                             websocketStatus === 'polling' ? 'POLLING' : 'WS DOWN'} · 
-                            {lastUpdate.toLocaleTimeString('pt-BR')}
-                        </span>
-                    </div>
-                    
-                    <span style={{ color: '#30363d' }}>|</span>
-                    <span style={{ color: '#8b949e', fontSize: '11px' }}>
-                        Ciclos: {updateCount.toLocaleString()}
-                    </span>
-                    
-                    {/* Controles */}
-                    <button 
-                        style={styles.btn(isLive ? 'warning' : 'success')} 
-                        onClick={() => setIsLive(!isLive)}
-                    >
-                        {isLive ? '⏸️ Pausar' : '▶️ Retomar'}
-                    </button>
-                    <button style={styles.btn('primary')} onClick={loadAllData}>
-                        🔄 Atualizar
-                    </button>
-                    <button style={styles.btn()} onClick={handleForcarTodosOffline}>
-                        👥 Forçar Offline
-                    </button>
-                    <button style={styles.btn()} onClick={handleBackup}>
-                        💾 Backup
-                    </button>
-                    <button 
-                        style={{...styles.btn(), background: '#30363d'}} 
-                        onClick={handleLogout}
-                    >
-                        🚪 Sair
-                    </button>
-                </div>
-            </header>
-            
-            <main style={styles.main}>
-                {/* SERVER METRICS */}
-                <div style={styles.serverGrid}>
-                    <div style={styles.serverCard(serverMetrics.cpu < 70 ? 'ok' : 'warning')}>
-                        <div style={styles.serverTitle}>🖥️ CPU Usage</div>
-                        <div style={styles.serverValue}>{serverMetrics.cpu.toFixed(1)}%</div>
-                        <div style={styles.serverDetail}>
-                            Cores: 4 · Threads: 8<br/>
-                            Temp: 45°C
-                        </div>
-                    </div>
-                    
-                    <div style={styles.serverCard(serverMetrics.memory < 80 ? 'ok' : 'warning')}>
-                        <div style={styles.serverTitle}>💾 Memory</div>
-                        <div style={styles.serverValue}>{serverMetrics.memory.toFixed(1)}%</div>
-                        <div style={styles.serverDetail}>
-                            Total: 16GB · Used: {(serverMetrics.memory * 0.16).toFixed(1)}GB<br/>
-                            Swap: 0%
-                        </div>
-                    </div>
-                    
-                    <div style={styles.serverCard('ok')}>
-                        <div style={styles.serverTitle}>💿 Disk</div>
-                        <div style={styles.serverValue}>{serverMetrics.disk.toFixed(1)}%</div>
-                        <div style={styles.serverDetail}>
-                            Total: 500GB · Free: {(500 * (1 - serverMetrics.disk/100)).toFixed(0)}GB<br/>
-                            I/O: 2.3 MB/s
-                        </div>
-                    </div>
-                    
-                    <div style={styles.serverCard('ok')}>
-                        <div style={styles.serverTitle}>⏱️ Uptime</div>
-                        <div style={styles.serverValue}>{serverMetrics.uptime}</div>
-                        <div style={styles.serverDetail}>
-                            Requests/s: {serverMetrics.requests_per_sec}<br/>
-                            Active: {serverMetrics.active_connections}
-                        </div>
-                    </div>
-                    
-                    <div style={styles.serverCard('ok')}>
-                        <div style={styles.serverTitle}>🌐 Network</div>
-                        <div style={styles.serverValue}>{formatBytes(serverMetrics.network_in)}/s</div>
-                        <div style={styles.serverDetail}>
-                            In: {formatBytes(serverMetrics.network_in * 1024)}<br/>
-                            Out: {formatBytes(serverMetrics.network_out * 1024)}
-                        </div>
-                    </div>
-                    
-                    <div style={styles.serverCard(
-                        websocketStatus === 'connected' ? 'ok' : 'warning'
-                    )}>
-                        <div style={styles.serverTitle}>🔌 WebSocket</div>
-                        <div style={styles.serverValue}>
-                            {websocketStatus === 'connected' ? 'LIVE' : 
-                             websocketStatus === 'polling' ? 'POLL' : 'DOWN'}
-                        </div>
-                        <div style={styles.serverDetail}>
-                            TLS: ✅ · Handshakes: {tlsHandshakes.length}<br/>
-                            Latency: {estatisticas.latencia_media || 0}ms
-                        </div>
-                    </div>
-                </div>
-                
-                {/* METRICS GRID */}
-                <div style={styles.metricsGrid}>
-                    <div style={styles.metricCard} onClick={() => setActiveTab('users')}>
-                        <div style={styles.metricIcon}>👥</div>
-                        <div style={styles.metricValue}>{stats.total_usuarios}</div>
-                        <div style={styles.metricLabel}>Usuários</div>
-                        <div style={styles.metricChange(true)}>
-                            🟢 {stats.online} online
-                        </div>
-                    </div>
-                    
-                    <div style={styles.metricCard}>
-                        <div style={styles.metricIcon}>💬</div>
-                        <div style={styles.metricValue}>{stats.total_mensagens}</div>
-                        <div style={styles.metricLabel}>Mensagens</div>
-                        <div style={styles.metricChange(true)}>
-                            ↑ {stats.mensagens_24h || 0} hoje
-                        </div>
-                    </div>
-                    
-                    <div style={styles.metricCard}>
-                        <div style={styles.metricIcon}>📊</div>
-                        <div style={styles.metricValue}>{stats.conversas_ativas}</div>
-                        <div style={styles.metricLabel}>Conversas</div>
-                    </div>
-                    
-                    <div style={styles.metricCard}>
-                        <div style={styles.metricIcon}>🔑</div>
-                        <div style={styles.metricValue}>{stats.total_chaves || 0}</div>
-                        <div style={styles.metricLabel}>Chaves Ativas</div>
-                    </div>
-                    
-                    <div style={styles.metricCard}>
-                        <div style={styles.metricIcon}>🔐</div>
-                        <div style={styles.metricValue}>
-                            {cryptoStatus?.algoritmos ? 
-                                Object.values(cryptoStatus.algoritmos).filter(a => a.ok).length : 0}
-                        </div>
-                        <div style={styles.metricLabel}>Algoritmos OK</div>
-                    </div>
-                    
-                    <div style={styles.metricCard}>
-                        <div style={styles.metricIcon}>🛡️</div>
-                        <div style={styles.metricValue}>
-                            {securityLogs.filter(l => l.type === 'error').length}
-                        </div>
-                        <div style={styles.metricLabel}>Alertas</div>
-                        <div style={styles.metricChange(false)}>
-                            ⚠️ Verificar
-                        </div>
-                    </div>
-                </div>
-                
-                {/* CHARTS */}
-                <div style={styles.chartsGrid}>
-                    <div style={styles.chartCard}>
-                        <div style={styles.chartTitle}>
-                            <span>📈 Tráfego de Mensagens</span>
-                            <span style={{ fontSize: '11px', color: '#8b949e' }}>
-                                Últimas 12 horas
-                            </span>
-                        </div>
-                        <div style={{ height: '300px' }}>
-                            <Line data={messageChartData} options={chartOptions} />
-                        </div>
-                    </div>
-                    
-                    <div style={styles.chartCard}>
-                        <div style={styles.chartTitle}>
-                            <span>🔐 Distribuição de Criptografia</span>
-                        </div>
-                        <div style={{ height: '300px', display: 'flex', alignItems: 'center' }}>
-                            <Doughnut 
-                                data={cryptoChartData} 
-                                options={{
-                                    ...chartOptions,
-                                    plugins: {
-                                        legend: {
-                                            position: 'bottom',
-                                            labels: { color: '#8b949e', font: { size: 10 } }
-                                        }
-                                    }
-                                }} 
-                            />
-                        </div>
-                    </div>
-                </div>
-                
-                {/* SERVER LOAD CHART */}
-                <div style={styles.section}>
-                    <div style={styles.sectionTitle}>
-                        <span>📊 Carga do Servidor</span>
-                    </div>
-                    <div style={{ height: '200px' }}>
-                        <Line data={serverLoadData} options={chartOptions} />
-                    </div>
-                </div>
-                
-                {/* CRYPTO STATUS */}
-                <div style={styles.section}>
-                    <div style={styles.sectionTitle}>
-                        <span>🔐 Status de Criptografia & TLS</span>
-                        <div style={{ display: 'flex', gap: '8px' }}>
-                            <button style={styles.btn()} onClick={loadAllData}>
-                                🔄 Verificar
-                            </button>
-                            <button style={styles.btn('warning')} onClick={handleLimparLogs}>
-                                🗑️ Limpar Logs
-                            </button>
-                        </div>
-                    </div>
-                    
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                        {/* Algoritmos */}
-                        <div>
-                            <h4 style={{ color: '#8b949e', marginBottom: '12px', fontSize: '12px' }}>
-                                Algoritmos Criptográficos
-                            </h4>
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                                {cryptoStatus?.algoritmos && Object.entries(cryptoStatus.algoritmos).map(([name, data]) => (
-                                    <div key={name} style={{
-                                        padding: '12px',
-                                        background: '#0d1117',
-                                        borderRadius: '8px',
-                                        border: `1px solid ${data.ok ? '#238636' : '#da3633'}`,
-                                        display: 'flex',
-                                        justifyContent: 'space-between',
-                                        alignItems: 'center'
-                                    }}>
-                                        <span style={{ fontSize: '12px', color: '#c9d1d9' }}>
-                                            {name.replace(/_/g, '-').toUpperCase()}
-                                        </span>
-                                        <span style={{ fontSize: '12px', color: data.ok ? '#238636' : '#da3633' }}>
-                                            {data.ok ? '✅ ATIVO' : '❌ FALHA'}
-                                        </span>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                        
-                        {/* TLS Handshakes */}
-                        <div>
-                            <h4 style={{ color: '#8b949e', marginBottom: '12px', fontSize: '12px' }}>
-                                Handshakes TLS Recentes
-                            </h4>
-                            <div style={styles.tableWrapper}>
-                                <table style={styles.table}>
-                                    <thead>
-                                        <tr>
-                                            <th style={styles.th}>Timestamp</th>
-                                            <th style={styles.th}>IP</th>
-                                            <th style={styles.th}>Cipher</th>
-                                            <th style={styles.th}>Status</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {tlsHandshakes.slice(0, 5).map((h, i) => (
-                                            <tr key={i}>
-                                                <td style={styles.td}>
-                                                    {new Date(h.timestamp).toLocaleTimeString('pt-BR')}
-                                                </td>
-                                                <td style={styles.td}>{h.ip || '192.168.1.' + i}</td>
-                                                <td style={styles.td}>{h.cipher || 'TLS_AES_256_GCM'}</td>
-                                                <td style={styles.td}>
-                                                    <span style={styles.badge('success')}>OK</span>
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
-                {/* USERS TABLE */}
-                <div style={styles.section}>
-                    <div style={styles.sectionTitle}>
-                        <span>👥 Usuários ({usuarios.length})</span>
-                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                            <span style={{ fontSize: '12px', color: '#8b949e' }}>
-                                🟢 {usuarios.filter(u => u.online).length} online
-                            </span>
-                            <button style={styles.btn()} onClick={handleForcarTodosOffline}>
-                                Forçar Todos Offline
-                            </button>
-                        </div>
-                    </div>
-                    
-                    <div style={styles.tableWrapper}>
-                        <table style={styles.table}>
-                            <thead>
-                                <tr>
-                                    <th style={styles.th}>ID</th>
-                                    <th style={styles.th}>Username</th>
-                                    <th style={styles.th}>Telefone</th>
-                                    <th style={styles.th}>Status</th>
-                                    <th style={styles.th}>Mensagens</th>
-                                    <th style={styles.th}>Criptografia</th>
-                                    <th style={styles.th}>Última Atividade</th>
-                                    <th style={styles.th}>Ações</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {usuarios.map(u => (
-                                    <tr key={u.id} style={{
-                                        background: u.online ? 'rgba(35,134,54,0.05)' : 'transparent',
-                                        cursor: 'pointer'
-                                    }}>
-                                        <td style={styles.td}>
-                                            <code style={{ fontSize: '11px', color: '#e53935' }}>
-                                                {u.id?.substring(0, 8)}
-                                            </code>
-                                        </td>
-                                        <td style={styles.td}>{u.username}</td>
-                                        <td style={styles.td}>{u.telefone}</td>
-                                        <td style={styles.td}>
-                                            <span style={{
-                                                color: u.online ? '#4caf50' : '#8b949e',
-                                                fontWeight: 'bold'
-                                            }}>
-                                                {u.online ? '🟢 Online' : '⚫ Offline'}
-                                            </span>
-                                        </td>
-                                        <td style={styles.td}>{u.mensagens || 0}</td>
-                                        <td style={styles.td}>
-                                            <span style={styles.badge(u.crypto_status === 'ok' ? 'success' : 'warning')}>
-                                                {u.algoritmo || 'BASE64'}
-                                            </span>
-                                        </td>
-                                        <td style={styles.td}>
-                                            {u.ultimo_visto ? 
-                                                new Date(u.ultimo_visto).toLocaleTimeString('pt-BR') : 
-                                                'N/A'}
-                                        </td>
-                                        <td style={styles.td}>
-                                            <div style={{ display: 'flex', gap: '4px' }}>
-                                                {u.online && (
-                                                    <button 
-                                                        style={{...styles.btn(), padding: '4px 8px', fontSize: '10px'}}
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            handleForcarLogout(u.id);
-                                                        }}
-                                                    >
-                                                        Logout
-                                                    </button>
-                                                )}
-                                                <button 
-                                                    style={{...styles.btn('warning'), padding: '4px 8px', fontSize: '10px'}}
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        handleRevogarChaves(u.id);
-                                                    }}
-                                                >
-                                                    Revogar Chaves
-                                                </button>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-                
-                {/* SECURITY LOGS */}
-                <div style={styles.section}>
-                    <div style={styles.sectionTitle}>
-                        <span>🛡️ Console de Segurança</span>
-                        <span style={{ fontSize: '11px', color: '#8b949e' }}>
-                            Últimos {securityLogs.length} eventos
-                        </span>
-                    </div>
-                    <div style={styles.console} ref={consoleRef}>
-                        {securityLogs.map(log => (
-                            <div key={log.id} style={styles.logLine(log.type)}>
-                                <span style={{ color: '#8b949e' }}>
-                                    [{new Date(log.timestamp).toLocaleTimeString('pt-BR')}]
-                                </span>
-                                {' '}
-                                <span style={{ 
-                                    color: log.type === 'error' ? '#da3633' : 
-                                           log.type === 'warning' ? '#d2991d' : '#238636' 
-                                }}>
-                                    {log.type === 'error' ? '❌' : 
-                                     log.type === 'warning' ? '⚠️' : '✅'}
-                                </span>
-                                {' '}
-                                {log.message}
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            </main>
-            
-            <style>{`
-                @keyframes pulse {
-                    0% { opacity: 1; transform: scale(1); box-shadow: 0 0 10px rgba(76, 175, 80, 0.5); }
-                    50% { opacity: 0.6; transform: scale(1.2); box-shadow: 0 0 20px rgba(76, 175, 80, 0.8); }
-                    100% { opacity: 1; transform: scale(1); box-shadow: 0 0 10px rgba(76, 175, 80, 0.5); }
-                }
-                @keyframes fadeIn {
-                    from { opacity: 0; transform: translateY(-10px); }
-                    to { opacity: 1; transform: translateY(0); }
-                }
-                * { box-sizing: border-box; margin: 0; padding: 0; }
-                ::-webkit-scrollbar { width: 8px; height: 8px; }
-                ::-webkit-scrollbar-track { background: #0d1117; }
-                ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
-                ::-webkit-scrollbar-thumb:hover { background: #e53935; }
-                table { animation: fadeIn 0.3s ease; }
-                tr:hover { background: rgba(229, 57, 53, 0.05) !important; }
-            `}</style>
-        </div>
-    );
+      return true;
+    } catch (error) {
+      console.error('Erro ao inscrever para push:', error);
+      throw error;
+    }
+  }
+
+  async sendTestNotification() {
+    try {
+      const token = localStorage.getItem('token');
+      await fetch('/api/push/test', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      return true;
+    } catch (error) {
+      console.error('Erro ao enviar notificação teste:', error);
+      return false;
+    }
+  }
+
+  urlBase64ToUint8Array(base64String) {
+    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+    const base64 = (base64String + padding)
+      .replace(/\-/g, '+')
+      .replace(/_/g, '/');
+
+    const rawData = window.atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+
+    for (let i = 0; i < rawData.length; ++i) {
+      outputArray[i] = rawData.charCodeAt(i);
+    }
+    return outputArray;
+  }
 }
 
-export default Admin;
+const pushManager = new PushManager();
+
+// ===== ÍCONES SVG =====
+const Icons = {
+  Menu: () => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>,
+  Close: () => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,
+  Chat: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>,
+  Send: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>,
+  PersonAdd: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>,
+  Logout: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>,
+  Check: () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>,
+  CloseCircle: () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>,
+  ChevronLeft: () => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="15 18 9 12 15 6"/></svg>,
+  Lock: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>,
+  Users: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>,
+  Search: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>,
+  Bell: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>,
+  BellOff: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M13.73 21a2 2 0 0 1-3.46 0"/><path d="M18.63 13A17.89 17.89 0 0 1 18 8"/><path d="M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14"/><path d="M18 8a6 6 0 0 0-9.33-5"/><line x1="1" y1="1" x2="23" y2="23"/></svg>,
+};
+
+// ===== COMPONENTES MEMORIZADOS =====
+const Avatar = React.memo(({ name, online, size = 44 }) => (
+  <div style={{
+    width: size, height: size, borderRadius: 14,
+    background: 'linear-gradient(135deg, #dc2626, #06b6d4)',
+    color: '#fff', display: 'flex', alignItems: 'center',
+    justifyContent: 'center', fontWeight: '800',
+    fontSize: size > 40 ? 16 : 13, position: 'relative', flexShrink: 0,
+    boxShadow: '0 8px 24px rgba(220, 38, 38, 0.25), 0 4px 12px rgba(6, 182, 212, 0.2)',
+    border: '2px solid rgba(255,255,255,0.3)'
+  }}>
+    {(name || '??').substring(0, 2).toUpperCase()}
+    {online !== undefined && (
+      <span style={{
+        position: 'absolute', bottom: -3, right: -3,
+        width: 16, height: 16, borderRadius: '50%',
+        border: '3px solid #0f172a',
+        background: online ? '#10b981' : '#64748b',
+        boxShadow: online ? '0 0 12px rgba(16, 185, 129, 0.6)' : 'none'
+      }}/>
+    )}
+  </div>
+));
+
+const MessageBubble = React.memo(({ msg, isOwn }) => (
+  <div style={{
+    maxWidth: '72%', padding: '12px 16px',
+    borderRadius: isOwn ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
+    background: isOwn ? 'linear-gradient(135deg, #dc2626, #06b6d4)' : 'rgba(30, 41, 59, 0.8)',
+    color: '#fff',
+    alignSelf: isOwn ? 'flex-end' : 'flex-start',
+    boxShadow: isOwn 
+      ? '0 8px 24px rgba(220, 38, 38, 0.3), 0 4px 12px rgba(6, 182, 212, 0.2)'
+      : '0 4px 16px rgba(0, 0, 0, 0.3)',
+    fontSize: 14, lineHeight: 1.6, wordBreak: 'break-word',
+    backdropFilter: 'blur(10px)',
+    border: isOwn ? '1px solid rgba(255,255,255,0.2)' : '1px solid rgba(255,255,255,0.1)'
+  }}>
+    {typeof msg.conteudo === 'string' ? msg.conteudo : '[Mensagem criptografada]'}
+    <div style={{ fontSize: 10, marginTop: 5, textAlign: 'right', opacity: 0.6 }}>
+      {msg.enviada_em ? new Date(msg.enviada_em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : ''}
+    </div>
+  </div>
+));
+
+const Divider = React.memo(() => (
+  <div style={{
+    height: '2px',
+    background: 'linear-gradient(90deg, #dc2626, #06b6d4, #dc2626)',
+    boxShadow: '0 2px 8px rgba(220, 38, 38, 0.3), 0 2px 8px rgba(6, 182, 212, 0.2)',
+    borderRadius: 1
+  }}/>
+));
+
+// ===== COMPONENTE PRINCIPAL =====
+function App() {
+  const [auth, setAuth] = useState(false);
+  const [user, setUser] = useState(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [authTab, setAuthTab] = useState('login');
+  const [login, setLogin] = useState({ username: '', password: '' });
+  const [reg, setReg] = useState({ username: '', password: '', telefone: '' });
+  const [loading, setLoading] = useState(false);
+  const [tab, setTab] = useState('chats');
+  const [friends, setFriends] = useState([]);
+  const [selFriend, setSelFriend] = useState(null);
+  const [msgs, setMsgs] = useState([]);
+  const [newMsg, setNewMsg] = useState('');
+  const [requests, setRequests] = useState([]);
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchPhone, setSearchPhone] = useState('');
+  const [searchResult, setSearchResult] = useState(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  const msgEnd = useRef(null);
+
+  // ===== DETECTAR MOBILE =====
+  useEffect(() => {
+    const handleResize = () => {
+      const mobile = window.innerWidth < 768;
+      setIsMobile(mobile);
+      if (!mobile) setSidebarOpen(false);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // ===== INICIALIZAÇÃO =====
+  useEffect(() => {
+    const t = localStorage.getItem('token'), u = localStorage.getItem('user');
+    if (t && u) {
+      const d = JSON.parse(u);
+      setUser(d);
+      setAuth(true);
+      setIsAdmin(d.username === 'admin');
+    }
+  }, []);
+
+  // ===== PUSH NOTIFICATIONS =====
+  useEffect(() => {
+    if (auth && !isAdmin) {
+      const initPush = async () => {
+        try {
+          const ok = await pushManager.init();
+          if (ok) {
+            const subscribed = await pushManager.checkSubscription();
+            setNotificationsEnabled(subscribed);
+            
+            if (!subscribed && Notification.permission === 'granted') {
+              await pushManager.subscribeUser();
+              setNotificationsEnabled(true);
+            }
+          }
+        } catch (e) {
+          console.log('Push init error:', e);
+        }
+      };
+      initPush();
+    }
+  }, [auth, isAdmin]);
+
+  // ===== POLLING INTELIGENTE =====
+  useEffect(() => {
+    if (!auth || isAdmin) return;
+
+    let active = true;
+    let lastFriends = '';
+    let lastRequests = '';
+
+    const poll = async () => {
+      if (!active) return;
+      try {
+        const [fr, rq] = await Promise.all([
+          userService.getFriends(),
+          userService.getFriendRequests()
+        ]);
+        
+        if (!active) return;
+        
+        const friendsStr = JSON.stringify(fr.data.amigos || []);
+        const requestsStr = JSON.stringify(rq.data.recebidas || []);
+        
+        if (friendsStr !== lastFriends) {
+          lastFriends = friendsStr;
+          setFriends(fr.data.amigos || []);
+        }
+        
+        if (requestsStr !== lastRequests) {
+          lastRequests = requestsStr;
+          setRequests(rq.data.recebidas || []);
+        }
+      } catch (e) {}
+    };
+
+    poll();
+    const interval = setInterval(poll, 1000);
+    
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [auth, isAdmin]);
+
+  // ===== POLLING MENSAGENS =====
+  useEffect(() => {
+    if (!selFriend?.conversa_id) return;
+
+    let active = true;
+    let lastMsgs = '';
+
+    const pollMsgs = async () => {
+      if (!active) return;
+      try {
+        const r = await chatService.getMessages(selFriend.conversa_id);
+        if (!active) return;
+        
+        const msgsStr = JSON.stringify(r.data.mensagens || []);
+        if (msgsStr !== lastMsgs) {
+          lastMsgs = msgsStr;
+          setMsgs(r.data.mensagens || []);
+        }
+      } catch (e) {}
+    };
+
+    pollMsgs();
+    const interval = setInterval(pollMsgs, 1000);
+
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [selFriend?.conversa_id]);
+
+  // ===== SCROLL =====
+  useEffect(() => {
+    if (msgEnd.current) {
+      msgEnd.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }
+  }, [msgs]);
+
+  // ===== HANDLERS =====
+  const handleSelectFriend = useCallback((friend) => {
+    setSelFriend(friend);
+    if (window.innerWidth < 768) setSidebarOpen(false);
+  }, []);
+
+  const sendMsg = useCallback(async () => {
+    const msg = newMsg.trim();
+    if (!msg || !selFriend?.conversa_id) return;
+
+    setNewMsg('');
+    
+    try {
+      await chatService.sendMessage(selFriend.conversa_id, msg);
+      const r = await chatService.getMessages(selFriend.conversa_id);
+      setMsgs(r.data.mensagens || []);
+    } catch (err) {
+      setNewMsg(msg);
+      alert('Erro ao enviar mensagem');
+    }
+  }, [newMsg, selFriend]);
+
+  const doLogin = useCallback(async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      const r = await authService.login(login);
+      const userData = r.data.usuario;
+      setUser(userData);
+      setAuth(true);
+      localStorage.setItem('token', r.data.token);
+      localStorage.setItem('user', JSON.stringify(userData));
+      setIsAdmin(userData.username === 'admin');
+      setLogin({ username: '', password: '' });
+    } catch (err) {
+      alert('Login falhou.');
+    } finally {
+      setLoading(false);
+    }
+  }, [login]);
+
+  const doRegister = useCallback(async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      const r = await authService.register({
+        username: reg.username,
+        password: reg.password,
+        numero_celular: reg.telefone,
+      });
+      const userData = r.data.usuario;
+      setUser(userData);
+      setAuth(true);
+      localStorage.setItem('token', r.data.token);
+      localStorage.setItem('user', JSON.stringify(userData));
+      setIsAdmin(userData.username === 'admin');
+      setReg({ username: '', password: '', telefone: '' });
+    } catch (err) {
+      alert('Registro falhou.');
+    } finally {
+      setLoading(false);
+    }
+  }, [reg]);
+
+  const doLogout = useCallback(() => {
+    localStorage.clear();
+    setAuth(false);
+    setUser(null);
+    setIsAdmin(false);
+    setFriends([]);
+    setSelFriend(null);
+    setMsgs([]);
+  }, []);
+
+  const enableNotifications = async () => {
+    try {
+      const result = await pushManager.requestPermission();
+      if (result.success) {
+        setNotificationsEnabled(true);
+        await pushManager.subscribeUser();
+        alert('✅ Notificações ativadas! Você receberá alertas mesmo com o navegador fechado.');
+      } else {
+        alert('❌ Permissão negada. Ative nas configurações do navegador.');
+      }
+    } catch (e) {
+      console.error('Erro:', e);
+    }
+  };
+
+  const disableNotifications = () => {
+    setNotificationsEnabled(false);
+    alert('🔕 Notificações desativadas.');
+  };
+
+  const doSearch = useCallback(async () => {
+    if (!searchPhone.trim()) return;
+    try {
+      const r = await userService.searchByPhone(searchPhone);
+      setSearchResult(r.data);
+    } catch (err) {}
+  }, [searchPhone]);
+
+  const sendReq = useCallback(async () => {
+    try {
+      await userService.sendFriendRequest(searchResult.usuario.telefone);
+      alert('Solicitação enviada!');
+      setShowSearch(false);
+      setSearchPhone('');
+      setSearchResult(null);
+    } catch (e) {
+      alert(e.response?.data?.erro || 'Erro');
+    }
+  }, [searchResult]);
+
+  const acceptReq = useCallback(async (id) => {
+    try {
+      await userService.respondToRequest(id, 'ACEITAR');
+      const [fr, rq] = await Promise.all([
+        userService.getFriends(),
+        userService.getFriendRequests()
+      ]);
+      setFriends(fr.data.amigos || []);
+      setRequests(rq.data.recebidas || []);
+    } catch (e) {}
+  }, []);
+
+  const rejectReq = useCallback(async (id) => {
+    try {
+      await userService.respondToRequest(id, 'RECUSAR');
+      const r = await userService.getFriendRequests();
+      setRequests(r.data.recebidas || []);
+    } catch (e) {}
+  }, []);
+
+  // ===== REDIRECIONAR ADMIN =====
+  if (auth && isAdmin) return <Admin />;
+
+  // ===== LOGIN PAGE =====
+  if (!auth) {
+    return (
+      <div style={{
+        minHeight: '100vh', width: '100vw', display: 'flex',
+        alignItems: 'center', justifyContent: 'center',
+        background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%)',
+        padding: 0, margin: 0, overflow: 'hidden'
+      }}>
+        <style>{`
+          * { box-sizing: border-box; margin: 0; padding: 0; }
+          body { 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #0f172a; margin: 0; padding: 0; overflow: hidden;
+          }
+          #root { width: 100vw; height: 100vh; }
+        `}</style>
+        
+        {/* Partículas de fundo */}
+        <div style={{
+          position: 'fixed', inset: 0, pointerEvents: 'none', opacity: 0.1,
+          background: 'radial-gradient(circle at 20% 50%, #dc2626 0%, transparent 50%), radial-gradient(circle at 80% 50%, #06b6d4 0%, transparent 50%)'
+        }}/>
+        
+        <div style={{
+          width: '100%', maxWidth: 420, background: 'rgba(30, 41, 59, 0.9)',
+          borderRadius: 24, padding: '36px 28px',
+          boxShadow: '0 24px 48px rgba(0,0,0,0.6), 0 0 0 1px rgba(220,38,38,0.3), 0 0 0 2px rgba(6,182,212,0.2)',
+          backdropFilter: 'blur(24px)',
+          border: '1px solid rgba(255,255,255,0.1)',
+          position: 'relative', zIndex: 1
+        }}>
+          <div style={{ textAlign: 'center', marginBottom: 32 }}>
+            <div style={{
+              width: 64, height: 64, margin: '0 auto 16px',
+              background: 'linear-gradient(135deg, #dc2626, #06b6d4)',
+              borderRadius: 16, display: 'flex', alignItems: 'center',
+              justifyContent: 'center', color: '#fff',
+              boxShadow: '0 12px 32px rgba(220, 38, 38, 0.4), 0 4px 16px rgba(6, 182, 212, 0.3)'
+            }}>
+              <Icons.Lock />
+            </div>
+            <h1 style={{
+              fontSize: 28, fontWeight: 900,
+              background: 'linear-gradient(135deg, #dc2626, #06b6d4)',
+              WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+              marginBottom: 6
+            }}>
+              Haremessenger
+            </h1>
+            <p style={{ color: '#94a3b8', fontSize: 13, fontWeight: 500 }}>Mensageiro Seguro com Criptografia</p>
+          </div>
+
+          <div style={{
+            display: 'flex', background: 'rgba(15, 23, 42, 0.8)', borderRadius: 10,
+            padding: 3, marginBottom: 24,
+            border: '1px solid rgba(220,38,38,0.2)'
+          }}>
+            {['login', 'register'].map(t => (
+              <button
+                key={t}
+                onClick={() => setAuthTab(t)}
+                style={{
+                  flex: 1, padding: 11, border: 'none', borderRadius: 8,
+                  cursor: 'pointer', fontSize: 13, fontWeight: authTab === t ? 700 : 500,
+                  background: authTab === t ? 'linear-gradient(135deg, #dc2626, #06b6d4)' : 'transparent',
+                  color: authTab === t ? '#fff' : '#94a3b8',
+                  boxShadow: authTab === t ? '0 4px 16px rgba(220,38,38,0.3)' : 'none',
+                  transition: 'all 0.2s'
+                }}
+              >
+                {t === 'login' ? 'Entrar' : 'Registrar'}
+              </button>
+            ))}
+          </div>
+
+          <Divider />
+          
+          <div style={{ marginTop: 24 }}>
+            {authTab === 'login' ? (
+              <form onSubmit={doLogin}>
+                <input type="text" placeholder="Username" value={login.username}
+                  onChange={e => setLogin(p => ({ ...p, username: e.target.value }))}
+                  required style={inputDarkStyle} />
+                <input type="password" placeholder="Senha" value={login.password}
+                  onChange={e => setLogin(p => ({ ...p, password: e.target.value }))}
+                  required style={{ ...inputDarkStyle, marginBottom: 20 }} />
+                <button type="submit" disabled={loading} style={btnDarkStyle(loading)}>
+                  {loading ? 'Entrando...' : '🔐 Entrar'}
+                </button>
+              </form>
+            ) : (
+              <form onSubmit={doRegister}>
+                <input type="text" placeholder="Username" value={reg.username}
+                  onChange={e => setReg(p => ({ ...p, username: e.target.value }))}
+                  required style={inputDarkStyle} />
+                <input type="tel" placeholder="Telefone" value={reg.telefone}
+                  onChange={e => setReg(p => ({ ...p, telefone: e.target.value }))}
+                  required style={inputDarkStyle} />
+                <input type="password" placeholder="Senha" value={reg.password}
+                  onChange={e => setReg(p => ({ ...p, password: e.target.value }))}
+                  required style={{ ...inputDarkStyle, marginBottom: 20 }} />
+                <button type="submit" disabled={loading} style={btnDarkStyle(loading)}>
+                  {loading ? 'Registrando...' : '✨ Criar Conta'}
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ===== DASHBOARD =====
+  return (
+    <div style={{
+      width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column',
+      background: '#0f172a', overflow: 'hidden', margin: 0, padding: 0
+    }}>
+      <style>{`
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { 
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+          background: #0f172a; overflow: hidden; margin: 0; padding: 0;
+        }
+        #root { width: 100vw; height: 100vh; overflow: hidden; }
+        @keyframes fadeInUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes slideIn { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        ::-webkit-scrollbar { width: 3px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: linear-gradient(#dc2626, #06b6d4); border-radius: 3px; }
+      `}</style>
+
+      {/* HEADER */}
+      <header style={{
+        background: 'rgba(15, 23, 42, 0.95)',
+        backdropFilter: 'blur(20px)',
+        padding: '12px 20px', display: 'flex', alignItems: 'center',
+        justifyContent: 'space-between', zIndex: 100, flexShrink: 0,
+        boxShadow: '0 4px 24px rgba(0,0,0,0.4), 0 1px 0 rgba(220,38,38,0.3)',
+        borderBottom: '1px solid rgba(220,38,38,0.2)'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {isMobile && (
+            <button onClick={() => setSidebarOpen(o => !o)} style={iconBtnDarkStyle}>
+              {sidebarOpen ? <Icons.Close /> : <Icons.Menu />}
+            </button>
+          )}
+          <h1 style={{
+            fontSize: isMobile ? 17 : 20, fontWeight: 900,
+            background: 'linear-gradient(135deg, #dc2626, #06b6d4)',
+            WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+            display: 'flex', alignItems: 'center', gap: 8
+          }}>
+            <Icons.Lock /> Haremessenger
+          </h1>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button
+            onClick={notificationsEnabled ? disableNotifications : enableNotifications}
+            style={{
+              padding: '8px 12px', borderRadius: 10,
+              background: notificationsEnabled ? 'rgba(16, 185, 129, 0.15)' : 'transparent',
+              border: notificationsEnabled ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid rgba(148, 163, 184, 0.2)',
+              cursor: 'pointer', fontSize: 16, color: notificationsEnabled ? '#10b981' : '#94a3b8',
+              display: 'flex', alignItems: 'center', transition: 'all 0.2s'
+            }}
+            title={notificationsEnabled ? 'Desativar notificações' : 'Ativar notificações'}
+          >
+            {notificationsEnabled ? <Icons.Bell /> : <Icons.BellOff />}
+          </button>
+          {!isMobile && (
+            <>
+              <button onClick={() => setShowSearch(true)} style={{
+                padding: '8px 16px', borderRadius: 10,
+                background: 'linear-gradient(135deg, #dc2626, #06b6d4)',
+                color: '#fff', border: 'none', cursor: 'pointer',
+                fontSize: 12, fontWeight: 700, display: 'flex', alignItems: 'center',
+                gap: 6, position: 'relative',
+                boxShadow: '0 4px 16px rgba(220,38,38,0.3), 0 2px 8px rgba(6,182,212,0.2)'
+              }}>
+                <Icons.PersonAdd /> Adicionar
+                {requests.length > 0 && (
+                  <span style={{
+                    position: 'absolute', top: -5, right: -5,
+                    background: '#ef4444', color: '#fff', borderRadius: 12,
+                    padding: '2px 7px', fontSize: 10, fontWeight: 800,
+                    boxShadow: '0 2px 8px rgba(239,68,68,0.5)',
+                    animation: 'pulse 2s infinite'
+                  }}>
+                    {requests.length}
+                  </span>
+                )}
+              </button>
+              <Avatar name={user?.username} size={36} />
+              <span style={{ fontWeight: 700, fontSize: 13, color: '#e2e8f0' }}>{user?.username}</span>
+            </>
+          )}
+          <button onClick={doLogout} style={{
+            padding: '8px 16px', background: 'transparent',
+            border: '1px solid rgba(220,38,38,0.3)', borderRadius: 10,
+            cursor: 'pointer', fontSize: 12, fontWeight: 700,
+            color: '#dc2626', display: 'flex', alignItems: 'center', gap: 5,
+            transition: 'all 0.2s'
+          }}>
+            <Icons.Logout /> {!isMobile && 'Sair'}
+          </button>
+        </div>
+      </header>
+
+      <Divider />
+
+      {/* MAIN */}
+      <div style={{ flex: 1, display: 'flex', position: 'relative', overflow: 'hidden' }}>
+        {/* SIDEBAR */}
+        <div style={{
+          width: isMobile ? '100%' : 380, height: '100%',
+          background: 'rgba(15, 23, 42, 0.95)',
+          backdropFilter: 'blur(20px)',
+          display: isMobile && !sidebarOpen ? 'none' : 'flex',
+          flexDirection: 'column', position: isMobile ? 'absolute' : 'relative',
+          zIndex: 50, flexShrink: 0,
+          borderRight: isMobile ? 'none' : '1px solid rgba(220,38,38,0.2)',
+          boxShadow: isMobile ? '0 24px 48px rgba(0,0,0,0.8)' : '0 4px 24px rgba(0,0,0,0.4)',
+          animation: isMobile && sidebarOpen ? 'slideIn 0.2s ease' : 'none'
+        }}>
+          {/* Tabs */}
+          <div style={{ display: 'flex', padding: '14px 14px 10px', gap: 8, flexShrink: 0 }}>
+            <button onClick={() => setTab('chats')} style={tabDarkStyle(tab === 'chats')}>
+              <Icons.Chat /> Chats
+            </button>
+            <button onClick={() => setTab('requests')} style={tabDarkStyle(tab === 'requests')}>
+              <Icons.Users /> Pedidos
+              {requests.length > 0 && (
+                <span style={{
+                  position: 'absolute', top: -4, right: -4,
+                  background: '#ef4444', color: '#fff', borderRadius: 10,
+                  padding: '2px 6px', fontSize: 9, fontWeight: 800,
+                  boxShadow: '0 2px 8px rgba(239,68,68,0.5)'
+                }}>
+                  {requests.length}
+                </span>
+              )}
+            </button>
+          </div>
+
+          <Divider />
+
+          {/* List */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: '6px 10px' }}>
+            {tab === 'chats' && friends.map(f => (
+              <div
+                key={f.id}
+                onClick={() => handleSelectFriend(f)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 12,
+                  padding: 12, borderRadius: 14, cursor: 'pointer',
+                  marginBottom: 4,
+                  background: selFriend?.id === f.id ? 'rgba(220,38,38,0.1)' : 'transparent',
+                  border: selFriend?.id === f.id
+                    ? '1px solid rgba(220,38,38,0.4)'
+                    : '1px solid transparent',
+                  transition: 'all 0.15s'
+                }}
+              >
+                <Avatar name={f.username} online={f.online} size={48} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: '#f1f5f9' }}>{f.username}</div>
+                  <div style={{ fontSize: 11, color: '#64748b', marginTop: 3 }}>{f.telefone}</div>
+                </div>
+                <div style={{
+                  width: 10, height: 10, borderRadius: '50%',
+                  background: f.online ? '#10b981' : '#334155',
+                  boxShadow: f.online ? '0 0 12px rgba(16,185,129,0.5)' : 'none',
+                  flexShrink: 0
+                }}/>
+              </div>
+            ))}
+            {tab === 'requests' && requests.map(r => (
+              <div key={r.id} style={{
+                display: 'flex', alignItems: 'center', gap: 10,
+                padding: 12, background: 'rgba(30,41,59,0.6)',
+                borderRadius: 14, marginBottom: 6,
+                border: '1px solid rgba(220,38,38,0.15)'
+              }}>
+                <Avatar name={r.remetente} size={44} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: '#f1f5f9' }}>{r.remetente}</div>
+                  <div style={{ fontSize: 11, color: '#64748b' }}>{r.telefone}</div>
+                </div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button onClick={() => acceptReq(r.id)} style={{
+                    padding: 8, background: '#10b981', border: 'none',
+                    borderRadius: 10, color: '#fff', cursor: 'pointer',
+                    display: 'flex', alignItems: 'center',
+                    boxShadow: '0 4px 12px rgba(16,185,129,0.3)'
+                  }}>
+                    <Icons.Check />
+                  </button>
+                  <button onClick={() => rejectReq(r.id)} style={{
+                    padding: 8, background: 'transparent',
+                    border: '1px solid #ef4444', borderRadius: 10,
+                    color: '#ef4444', cursor: 'pointer', display: 'flex', alignItems: 'center'
+                  }}>
+                    <Icons.CloseCircle />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Overlay mobile */}
+        {isMobile && sidebarOpen && (
+          <div onClick={() => setSidebarOpen(false)} style={{
+            position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.7)',
+            backdropFilter: 'blur(4px)', zIndex: 40
+          }}/>
+        )}
+
+        {/* CHAT */}
+        <div style={{
+          flex: 1, display: 'flex', flexDirection: 'column',
+          background: 'rgba(15, 23, 42, 0.6)', minWidth: 0
+        }}>
+          {selFriend ? (
+            <>
+              <div style={{
+                padding: '12px 20px', background: 'rgba(15, 23, 42, 0.95)',
+                backdropFilter: 'blur(20px)',
+                display: 'flex', alignItems: 'center', gap: 12,
+                flexShrink: 0, borderBottom: '1px solid rgba(220,38,38,0.2)',
+                boxShadow: '0 4px 24px rgba(0,0,0,0.4)'
+              }}>
+                {isMobile && (
+                  <button onClick={() => { setSelFriend(null); setSidebarOpen(true); }} style={iconBtnDarkStyle}>
+                    <Icons.ChevronLeft />
+                  </button>
+                )}
+                <Avatar name={selFriend.username} online={selFriend.online} size={44} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 800, fontSize: 15, color: '#f1f5f9' }}>{selFriend.username}</div>
+                  <div style={{ fontSize: 11, color: '#64748b', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{
+                      width: 8, height: 8, borderRadius: '50%',
+                      background: selFriend.online ? '#10b981' : '#334155',
+                      display: 'inline-block',
+                      boxShadow: selFriend.online ? '0 0 8px rgba(16,185,129,0.5)' : 'none'
+                    }}/>
+                    {selFriend.online ? 'Online agora' : 'Offline'}
+                  </div>
+                </div>
+              </div>
+
+              <Divider />
+
+              <div style={{
+                flex: 1, overflowY: 'auto', padding: '20px',
+                display: 'flex', flexDirection: 'column', gap: 10
+              }}>
+                {msgs.map(m => (
+                  <MessageBubble key={m.id} msg={m} isOwn={m.remetente === user.username} />
+                ))}
+                <div ref={msgEnd}/>
+              </div>
+
+              <Divider />
+
+              <div style={{
+                padding: '14px 20px', background: 'rgba(15, 23, 42, 0.95)',
+                backdropFilter: 'blur(20px)',
+                display: 'flex', gap: 10, alignItems: 'center', flexShrink: 0,
+                borderTop: '1px solid rgba(220,38,38,0.2)'
+              }}>
+                <input
+                  value={newMsg}
+                  onChange={e => setNewMsg(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), sendMsg())}
+                  placeholder="Digite sua mensagem..."
+                  style={{
+                    flex: 1, padding: '13px 18px',
+                    background: 'rgba(30, 41, 59, 0.8)',
+                    border: '1px solid rgba(220,38,38,0.2)',
+                    borderRadius: 50, fontSize: 14, outline: 'none',
+                    color: '#f1f5f9', backdropFilter: 'blur(10px)'
+                  }}
+                />
+                <button onClick={sendMsg} disabled={!newMsg.trim()} style={{
+                  width: 48, height: 48, borderRadius: '50%',
+                  background: 'linear-gradient(135deg, #dc2626, #06b6d4)',
+                  border: 'none', color: '#fff',
+                  cursor: newMsg.trim() ? 'pointer' : 'not-allowed',
+                  opacity: newMsg.trim() ? 1 : 0.5,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  flexShrink: 0,
+                  boxShadow: '0 8px 24px rgba(220,38,38,0.4), 0 4px 12px rgba(6,182,212,0.3)'
+                }}>
+                  <Icons.Send />
+                </button>
+              </div>
+            </>
+          ) : (
+            <div style={{
+              flex: 1, display: 'flex', alignItems: 'center',
+              justifyContent: 'center', padding: 24
+            }}>
+              <div style={{ textAlign: 'center', maxWidth: 360 }}>
+                <div style={{
+                  fontSize: 72, marginBottom: 16, opacity: 0.2,
+                  filter: 'grayscale(0.5)'
+                }}>💬</div>
+                <h2 style={{
+                  fontSize: 20, fontWeight: 800, marginBottom: 8,
+                  background: 'linear-gradient(135deg, #dc2626, #06b6d4)',
+                  WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent'
+                }}>
+                  {isMobile ? 'Selecione uma conversa' : 'Seus chats'}
+                </h2>
+                <p style={{ fontSize: 13, color: '#64748b', lineHeight: 1.6 }}>
+                  {isMobile ? 'Toque no menu para ver suas conversas' : 'Escolha um amigo para conversar com segurança'}
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Mobile Nav */}
+      {isMobile && !selFriend && (
+        <>
+          <Divider />
+          <div style={{
+            background: 'rgba(15, 23, 42, 0.95)',
+            backdropFilter: 'blur(20px)',
+            padding: '6px 16px', display: 'flex', justifyContent: 'space-around',
+            flexShrink: 0, borderTop: '1px solid rgba(220,38,38,0.2)'
+          }}>
+            <button onClick={() => { setTab('chats'); setSidebarOpen(true); }} style={mobileNavDarkStyle}>
+              <Icons.Chat /><span style={{ fontSize: 10 }}>Chats</span>
+            </button>
+            <button onClick={() => { setTab('requests'); setSidebarOpen(true); }} style={mobileNavDarkStyle}>
+              <Icons.Users /><span style={{ fontSize: 10 }}>Pedidos</span>
+              {requests.length > 0 && (
+                <span style={{
+                  position: 'absolute', top: 2, right: 'calc(50% - 22px)',
+                  background: '#ef4444', color: '#fff', borderRadius: 10,
+                  padding: '2px 6px', fontSize: 9, fontWeight: 800,
+                  boxShadow: '0 2px 8px rgba(239,68,68,0.5)'
+                }}>
+                  {requests.length}
+                </span>
+              )}
+            </button>
+            <button onClick={() => setShowSearch(true)} style={mobileNavDarkStyle}>
+              <Icons.PersonAdd /><span style={{ fontSize: 10 }}>Adicionar</span>
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* SEARCH MODAL */}
+      {showSearch && (
+        <div onClick={() => setShowSearch(false)} style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 1000, padding: 16
+        }}>
+          <div onClick={e => e.stopPropagation()} style={{
+            background: 'rgba(30, 41, 59, 0.95)',
+            backdropFilter: 'blur(24px)',
+            borderRadius: 24, padding: 32,
+            width: '100%', maxWidth: 460,
+            boxShadow: '0 24px 48px rgba(0,0,0,0.8), 0 0 0 1px rgba(220,38,38,0.3), 0 0 0 2px rgba(6,182,212,0.2)',
+            border: '1px solid rgba(255,255,255,0.1)'
+          }}>
+            <h2 style={{
+              fontSize: 20, fontWeight: 800, marginBottom: 8,
+              display: 'flex', alignItems: 'center', gap: 10,
+              background: 'linear-gradient(135deg, #dc2626, #06b6d4)',
+              WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent'
+            }}>
+              <Icons.PersonAdd /> Buscar Amigo
+            </h2>
+            <p style={{ fontSize: 13, color: '#94a3b8', marginBottom: 24 }}>
+              Digite o número de telefone para encontrar alguém.
+            </p>
+            
+            <Divider />
+            
+            <div style={{ display: 'flex', gap: 8, margin: '20px 0' }}>
+              <input type="tel" placeholder="+55 (00) 00000-0000"
+                value={searchPhone}
+                onChange={e => setSearchPhone(e.target.value)}
+                style={{
+                  flex: 1, padding: '12px 16px',
+                  background: 'rgba(15, 23, 42, 0.8)',
+                  border: '1px solid rgba(220,38,38,0.3)',
+                  borderRadius: 12, fontSize: 14, outline: 'none',
+                  color: '#f1f5f9'
+                }} />
+              <button onClick={doSearch} style={{
+                padding: '12px 24px',
+                background: 'linear-gradient(135deg, #dc2626, #06b6d4)',
+                color: '#fff', border: 'none', borderRadius: 12,
+                fontSize: 13, fontWeight: 700, cursor: 'pointer',
+                boxShadow: '0 4px 16px rgba(220,38,38,0.3)'
+              }}>
+                Buscar
+              </button>
+            </div>
+
+            {searchResult?.encontrado && (
+              <>
+                <Divider />
+                <div style={{
+                  padding: 16, background: 'rgba(15, 23, 42, 0.6)',
+                  borderRadius: 14, marginTop: 16,
+                  border: '1px solid rgba(220,38,38,0.2)'
+                }}>
+                  <div style={{ fontWeight: 700, fontSize: 16, color: '#f1f5f9', marginBottom: 4 }}>
+                    {searchResult.usuario.username}
+                  </div>
+                  <div style={{ fontSize: 13, color: '#94a3b8', marginBottom: 14 }}>
+                    {searchResult.usuario.telefone}
+                  </div>
+                  {searchResult.is_amigo ? (
+                    <span style={{
+                      padding: '7px 14px', background: 'rgba(16,185,129,0.15)',
+                      color: '#10b981', borderRadius: 20, fontSize: 12, fontWeight: 700,
+                      border: '1px solid rgba(16,185,129,0.3)'
+                    }}>✅ Já são amigos</span>
+                  ) : searchResult.solicitacao_enviada ? (
+                    <span style={{
+                      padding: '7px 14px', background: 'rgba(245,158,11,0.15)',
+                      color: '#f59e0b', borderRadius: 20, fontSize: 12, fontWeight: 700,
+                      border: '1px solid rgba(245,158,11,0.3)'
+                    }}>⏳ Aguardando</span>
+                  ) : (
+                    <button onClick={sendReq} style={{
+                      width: '100%', padding: 12,
+                      background: 'linear-gradient(135deg, #dc2626, #06b6d4)',
+                      color: '#fff', border: 'none', borderRadius: 12,
+                      fontSize: 14, fontWeight: 700, cursor: 'pointer',
+                      boxShadow: '0 4px 16px rgba(220,38,38,0.3)'
+                    }}>🤝 Adicionar Amigo</button>
+                  )}
+                </div>
+              </>
+            )}
+            
+            <button onClick={() => setShowSearch(false)} style={{
+              width: '100%', padding: 12, marginTop: 20,
+              background: 'rgba(30, 41, 59, 0.8)',
+              border: '1px solid rgba(148, 163, 184, 0.2)', borderRadius: 12,
+              fontSize: 13, fontWeight: 700, color: '#94a3b8', cursor: 'pointer'
+            }}>Fechar</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ===== ESTILOS DARK =====
+const inputDarkStyle = {
+  width: '100%', padding: '13px 16px',
+  background: 'rgba(15, 23, 42, 0.8)',
+  border: '1px solid rgba(220, 38, 38, 0.3)',
+  borderRadius: 10, fontSize: 14, outline: 'none',
+  marginBottom: 14, color: '#f1f5f9',
+  boxSizing: 'border-box'
+};
+
+const btnDarkStyle = (loading) => ({
+  width: '100%', padding: 14,
+  background: 'linear-gradient(135deg, #dc2626, #06b6d4)',
+  color: '#fff', border: 'none', borderRadius: 10,
+  fontSize: 14, fontWeight: 700,
+  cursor: loading ? 'not-allowed' : 'pointer',
+  opacity: loading ? 0.7 : 1,
+  boxShadow: '0 8px 24px rgba(220,38,38,0.3), 0 4px 12px rgba(6,182,212,0.2)'
+});
+
+const iconBtnDarkStyle = {
+  background: 'transparent', border: 'none', cursor: 'pointer',
+  padding: 8, color: '#f1f5f9', display: 'flex', alignItems: 'center'
+};
+
+const tabDarkStyle = (active) => ({
+  flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+  gap: 7, padding: '10px 14px', border: 'none', borderRadius: 12,
+  cursor: 'pointer', fontSize: 13, fontWeight: active ? 700 : 500,
+  background: active ? 'linear-gradient(135deg, #dc2626, #06b6d4)' : 'transparent',
+  color: active ? '#fff' : '#94a3b8',
+  boxShadow: active ? '0 4px 16px rgba(220,38,38,0.3)' : 'none',
+  position: 'relative', transition: 'all 0.2s'
+});
+
+const mobileNavDarkStyle = {
+  display: 'flex', flexDirection: 'column', alignItems: 'center',
+  gap: 4, background: 'transparent', border: 'none',
+  color: '#94a3b8', cursor: 'pointer', padding: 8,
+  position: 'relative', fontSize: 20
+};
+
+export default App;
