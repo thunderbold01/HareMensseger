@@ -34,7 +34,7 @@ const Icons = {
   Users: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>,
   Bell: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>,
   BellOff: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M13.73 21a2 2 0 0 1-3.46 0"/><path d="M18.63 13A17.89 17.89 0 0 1 18 8"/><line x1="1" y1="1" x2="23" y2="23"/></svg>,
-  Bot: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="14" rx="3"/><path d="M12 7v4"/><circle cx="8" cy="18" r="1.5"/><circle cx="16" cy="18" r="1.5"/><line x1="8" y1="21" x2="16" y2="21"/></svg>,
+  Bot: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="14" rx="3"/><circle cx="12" cy="9" r="2"/><circle cx="8" cy="18" r="1.5"/><circle cx="16" cy="18" r="1.5"/><line x1="8" y1="21" x2="16" y2="21"/></svg>,
   Trash: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>,
 };
 
@@ -49,23 +49,32 @@ const Divider = React.memo(() => (
 ));
 
 // ===== AVATAR =====
-const Avatar = React.memo(({ name, online, size = 40 }) => (
+const Avatar = React.memo(({ name, online, size = 40, isAI }) => (
   <div style={{
     width: size, height: size, borderRadius: 12,
-    background: 'linear-gradient(135deg, #dc2626, #06b6d4)',
+    background: isAI ? 'linear-gradient(135deg, #10b981, #06b6d4)' : 'linear-gradient(135deg, #dc2626, #06b6d4)',
     color: '#fff', display: 'flex', alignItems: 'center',
     justifyContent: 'center', fontWeight: '800',
     fontSize: size > 40 ? 15 : 12, position: 'relative', flexShrink: 0,
-    boxShadow: '0 4px 14px rgba(220,38,38,0.25), 0 2px 8px rgba(6,182,212,0.15)'
+    boxShadow: isAI ? '0 4px 14px rgba(16,185,129,0.3)' : '0 4px 14px rgba(220,38,38,0.25), 0 2px 8px rgba(6,182,212,0.15)'
   }}>
-    {(name || '??').substring(0, 2).toUpperCase()}
-    {online !== undefined && (
+    {isAI ? '🤖' : (name || '??').substring(0, 2).toUpperCase()}
+    {online !== undefined && !isAI && (
       <span style={{
         position: 'absolute', bottom: -2, right: -2,
         width: 13, height: 13, borderRadius: '50%',
         border: '2px solid #fff',
         background: online ? '#10b981' : '#cbd5e1',
         boxShadow: online ? '0 0 8px rgba(16,185,129,0.5)' : 'none'
+      }}/>
+    )}
+    {isAI && (
+      <span style={{
+        position: 'absolute', bottom: -2, right: -2,
+        width: 13, height: 13, borderRadius: '50%',
+        border: '2px solid #fff',
+        background: '#10b981',
+        boxShadow: '0 0 8px rgba(16,185,129,0.5)'
       }}/>
     )}
   </div>
@@ -93,7 +102,6 @@ function App() {
   const [searchResult, setSearchResult] = useState(null);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [fadeIn, setFadeIn] = useState(false);
-  const [pageTransition, setPageTransition] = useState(false);
   
   // Chat IA
   const [showAiChat, setShowAiChat] = useState(false);
@@ -109,7 +117,29 @@ function App() {
     window.addEventListener('resize', h); return () => window.removeEventListener('resize', h);
   }, []);
 
-  const handleSelectFriend = (f) => { setSelFriend(f); if (isMobile) setSidebarOpen(false); };
+  // Animação fade in
+  useEffect(() => {
+    const timer = setTimeout(() => setFadeIn(true), 50);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const handleSelectFriend = (f) => { 
+    if (f && f.id === 'ai') {
+      openAiChat();
+    } else {
+      setSelFriend(f); 
+      setShowAiChat(false);
+    }
+    if (isMobile) setSidebarOpen(false); 
+  };
+
+  const openAiChat = () => {
+    if (!showAiChat) {
+      setAiMessages([{ role: 'assistant', content: '👋 Olá! Eu sou o Thunderbold_AI. Como posso ajudar você hoje?', id: Date.now() }]);
+    }
+    setShowAiChat(true);
+    setSelFriend(null);
+  };
 
   useEffect(() => {
     const t = localStorage.getItem('token'), u = localStorage.getItem('user');
@@ -118,19 +148,6 @@ function App() {
       catch (e) { localStorage.clear(); }
     }
   }, []);
-
-  // Animação fade
-  useEffect(() => {
-    requestAnimationFrame(() => setFadeIn(true));
-  }, []);
-
-  const changePage = (page) => {
-    setPageTransition(true);
-    setTimeout(() => {
-      setAuthPage(page);
-      setPageTransition(false);
-    }, 300);
-  };
 
   useEffect(() => {
     if (auth && !isAdmin && 'Notification' in window && Notification.permission === 'granted') 
@@ -148,15 +165,16 @@ function App() {
 
   const disableNotifications = () => setNotificationsEnabled(false);
 
-  // Polling
+  // Polling mensagens
   useEffect(() => {
-    if (!selFriend?.conversa_id) return;
+    if (!selFriend?.conversa_id || showAiChat) return;
     let a = true;
     const p = async () => { if (!a) return; try { const r = await chatService.getMessages(selFriend.conversa_id); if (a) setMsgs(r.data.mensagens || []); } catch (e) {} };
     p(); const i = setInterval(p, 1000);
     return () => { a = false; clearInterval(i); };
-  }, [selFriend?.conversa_id]);
+  }, [selFriend?.conversa_id, showAiChat]);
 
+  // Polling amigos
   useEffect(() => {
     if (!auth || isAdmin) return;
     let a = true;
@@ -206,14 +224,7 @@ function App() {
     catch (err) { setNewMsg(m); }
   };
 
-  // ===== CHAT IA - THUNDERBOLD_AI =====
-  const toggleAiChat = () => {
-    if (!showAiChat) {
-      setAiMessages([{ role: 'assistant', content: '👋 Olá! Eu sou o Thunderbold_AI. Como posso ajudar você hoje?', id: Date.now() }]);
-    }
-    setShowAiChat(!showAiChat);
-  };
-
+  // ===== THUNDERBOLD_AI =====
   const sendToAI = async () => {
     if (!aiInput.trim() || aiLoading) return;
     
@@ -286,17 +297,16 @@ function App() {
         minHeight: '100vh', minHeight: '100dvh',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         background: '#f5f5f5',
-        backgroundImage: 'url("data:image/svg+xml,%3Csvg width=\'60\' height=\'60\' viewBox=\'0 0 60 60\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cg fill=\'none\' fill-rule=\'evenodd\'%3E%3Cg fill=\'%23e0e0e0\' fill-opacity=\'0.4\'%3E%3Cpath d=\'M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z\'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")',
+        backgroundImage: 'url("data:image/svg+xml,%3Csvg width=\'60\' height=\'60\' viewBox=\'0 0 60 60\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cg fill=\'none\' fill-rule=\'evenodd\'%3E%3Cg fill=\'%23e0e0e0\' fill-opacity=\'0.5\'%3E%3Cpath d=\'M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z\'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")',
         padding: 20, position: 'fixed', inset: 0, overflow: 'hidden'
       }}>
         <style>{`
           *{box-sizing:border-box;margin:0;padding:0}
           body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f5f5f5;overscroll-behavior:none}
           @keyframes shimmer{0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}}
-          @keyframes fadeInUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
-          @keyframes fadeInScale{from{opacity:0;transform:scale(0.96)}to{opacity:1;transform:scale(1)}}
+          @keyframes fadeInUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+          @keyframes fadeInScale{from{opacity:0;transform:scale(0.95)}to{opacity:1;transform:scale(1)}}
           @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
-          @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
           input{font-size:16px!important}
         `}</style>
 
@@ -305,7 +315,7 @@ function App() {
           borderRadius: 20, padding: '36px 28px',
           boxShadow: '0 25px 60px rgba(0,0,0,0.1)',
           position: 'relative', overflow: 'hidden',
-          animation: 'fadeInScale 0.5s ease',
+          animation: 'fadeInScale 0.5s ease forwards',
           maxHeight: '95vh', overflowY: 'auto'
         }}>
           {/* Linha camaleão */}
@@ -315,7 +325,7 @@ function App() {
             animation: 'shimmer 3s ease-in-out infinite', backgroundSize: '200% 100%'
           }}/>
 
-          <div style={{ textAlign: 'center', marginBottom: 28, marginTop: 6, animation: 'fadeInUp 0.6s ease' }}>
+          <div style={{ textAlign: 'center', marginBottom: 28, marginTop: 6, animation: 'fadeInUp 0.5s ease forwards' }}>
             <div style={{
               width: 56, height: 56, margin: '0 auto 12px',
               background: 'linear-gradient(135deg, #dc2626, #06b6d4)',
@@ -329,56 +339,50 @@ function App() {
           {/* Tabs */}
           <div style={{
             display: 'flex', background: '#f0f0f0', borderRadius: 10,
-            padding: 3, marginBottom: 24
+            padding: 3, marginBottom: 24, animation: 'fadeInUp 0.6s ease forwards'
           }}>
-            <button onClick={() => changePage('login')} style={tabBtnStyle(authPage === 'login')}>Entrar</button>
-            <button onClick={() => changePage('register')} style={tabBtnStyle(authPage === 'register')}>Criar Conta</button>
+            <button onClick={() => setAuthPage('login')} style={tabBtnStyle(authPage === 'login')}>Entrar</button>
+            <button onClick={() => setAuthPage('register')} style={tabBtnStyle(authPage === 'register')}>Criar Conta</button>
           </div>
 
-          {/* Formulário com transição */}
-          <div style={{
-            opacity: pageTransition ? 0 : 1,
-            transform: pageTransition ? 'translateY(8px)' : 'translateY(0)',
-            transition: 'all 0.3s ease'
-          }}>
-            {authPage === 'login' ? (
-              <form onSubmit={doLogin}>
-                <div style={{ animation: 'fadeInUp 0.4s ease' }}>
-                  <input type="text" placeholder="Username" value={login.username}
-                    onChange={e => setLogin(p => ({ ...p, username: e.target.value }))} required style={inp}/>
-                </div>
-                <div style={{ animation: 'fadeInUp 0.5s ease' }}>
-                  <input type="password" placeholder="Senha" value={login.password}
-                    onChange={e => setLogin(p => ({ ...p, password: e.target.value }))} required style={{ ...inp, marginBottom: 20 }}/>
-                </div>
-                <div style={{ animation: 'fadeInUp 0.6s ease' }}>
-                  <button type="submit" disabled={loading} style={btnStyle(loading)}>
-                    {loading ? <><span style={{ display: 'inline-block', width: 18, height: 18, border: '2px solid transparent', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.6s linear infinite', marginRight: 8 }}/> Entrando...</> : '🔐 Entrar'}
-                  </button>
-                </div>
-              </form>
-            ) : (
-              <form onSubmit={doRegister}>
-                <div style={{ animation: 'fadeInUp 0.4s ease' }}>
-                  <input type="text" placeholder="Username" value={reg.username}
-                    onChange={e => setReg(p => ({ ...p, username: e.target.value }))} required style={inp}/>
-                </div>
-                <div style={{ animation: 'fadeInUp 0.5s ease' }}>
-                  <input type="tel" placeholder="Telefone" value={reg.telefone}
-                    onChange={e => setReg(p => ({ ...p, telefone: e.target.value }))} required style={inp}/>
-                </div>
-                <div style={{ animation: 'fadeInUp 0.6s ease' }}>
-                  <input type="password" placeholder="Senha" value={reg.password}
-                    onChange={e => setReg(p => ({ ...p, password: e.target.value }))} required style={{ ...inp, marginBottom: 20 }}/>
-                </div>
-                <div style={{ animation: 'fadeInUp 0.7s ease' }}>
-                  <button type="submit" disabled={loading} style={btnStyle(loading)}>
-                    {loading ? <><span style={{ display: 'inline-block', width: 18, height: 18, border: '2px solid transparent', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.6s linear infinite', marginRight: 8 }}/> Criando...</> : '✨ Criar Conta'}
-                  </button>
-                </div>
-              </form>
-            )}
-          </div>
+          {/* Formulário */}
+          {authPage === 'login' ? (
+            <form onSubmit={doLogin}>
+              <div style={{ animation: 'fadeInUp 0.7s ease forwards' }}>
+                <input type="text" placeholder="Username" value={login.username}
+                  onChange={e => setLogin(p => ({ ...p, username: e.target.value }))} required style={inp}/>
+              </div>
+              <div style={{ animation: 'fadeInUp 0.8s ease forwards' }}>
+                <input type="password" placeholder="Senha" value={login.password}
+                  onChange={e => setLogin(p => ({ ...p, password: e.target.value }))} required style={{ ...inp, marginBottom: 20 }}/>
+              </div>
+              <div style={{ animation: 'fadeInUp 0.9s ease forwards' }}>
+                <button type="submit" disabled={loading} style={btnStyle(loading)}>
+                  {loading ? <><span style={spinnerStyle}/> Entrando...</> : '🔐 Entrar'}
+                </button>
+              </div>
+            </form>
+          ) : (
+            <form onSubmit={doRegister}>
+              <div style={{ animation: 'fadeInUp 0.7s ease forwards' }}>
+                <input type="text" placeholder="Username" value={reg.username}
+                  onChange={e => setReg(p => ({ ...p, username: e.target.value }))} required style={inp}/>
+              </div>
+              <div style={{ animation: 'fadeInUp 0.8s ease forwards' }}>
+                <input type="tel" placeholder="Telefone" value={reg.telefone}
+                  onChange={e => setReg(p => ({ ...p, telefone: e.target.value }))} required style={inp}/>
+              </div>
+              <div style={{ animation: 'fadeInUp 0.9s ease forwards' }}>
+                <input type="password" placeholder="Senha" value={reg.password}
+                  onChange={e => setReg(p => ({ ...p, password: e.target.value }))} required style={{ ...inp, marginBottom: 20 }}/>
+              </div>
+              <div style={{ animation: 'fadeInUp 1s ease forwards' }}>
+                <button type="submit" disabled={loading} style={btnStyle(loading)}>
+                  {loading ? <><span style={spinnerStyle}/> Criando...</> : '✨ Criar Conta'}
+                </button>
+              </div>
+            </form>
+          )}
         </div>
       </div>
     );
@@ -390,7 +394,7 @@ function App() {
       height: '100vh', height: '100dvh', display: 'flex', flexDirection: 'column',
       background: '#f5f5f5',
       backgroundImage: 'url("data:image/svg+xml,%3Csvg width=\'60\' height=\'60\' viewBox=\'0 0 60 60\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cg fill=\'none\' fill-rule=\'evenodd\'%3E%3Cg fill=\'%23e8e8e8\' fill-opacity=\'0.5\'%3E%3Cpath d=\'M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z\'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")',
-      overflow: 'hidden'
+      overflow: 'hidden', opacity: fadeIn ? 1 : 0, transition: 'opacity 0.4s ease'
     }}>
       <style>{`
         *{box-sizing:border-box;margin:0;padding:0}
@@ -400,7 +404,7 @@ function App() {
         @keyframes badgePulse{0%,100%{transform:scale(1)}50%{transform:scale(1.15)}}
         @keyframes shimmer{0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}}
         @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
-        @keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+        @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
         ::-webkit-scrollbar{width:3px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#d0d0d0;border-radius:3px}
         .badge-pulse{animation:badgePulse 2s infinite}
         input{font-size:16px!important}
@@ -418,17 +422,6 @@ function App() {
           <h1 style={logoStyle(isMobile)}><Icons.Lock /> Haremessenger</h1>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-          {/* Botão Thunderbold_AI */}
-          <button onClick={toggleAiChat} style={{
-            padding: '6px 10px', borderRadius: 7,
-            background: showAiChat ? '#f0fdf4' : 'transparent',
-            border: showAiChat ? '1px solid #10b981' : '1px solid #e5e5e5',
-            cursor: 'pointer', fontSize: 16, color: showAiChat ? '#10b981' : '#64748b',
-            display: 'flex', alignItems: 'center', gap: 4, position: 'relative',
-            fontWeight: 600, fontSize: 11
-          }}>
-            <Icons.Bot /> AI
-          </button>
           <button onClick={notificationsEnabled ? disableNotifications : enableNotifications}
             style={notifBtnStyle(notificationsEnabled)}>
             {notificationsEnabled ? <Icons.Bell /> : <Icons.BellOff />}
@@ -456,7 +449,7 @@ function App() {
         {/* SIDEBAR */}
         <div style={sidebarStyle(isMobile, sidebarOpen)}>
           <div style={{ display: 'flex', padding: '10px 10px 6px', gap: 5, flexShrink: 0 }}>
-            <button onClick={() => { setTab('chats'); if (showAiChat) setShowAiChat(false); }} style={sideTab(tab === 'chats' && !showAiChat)}>
+            <button onClick={() => { setTab('chats'); }} style={sideTab(tab === 'chats')}>
               <Icons.Chat /> Chats
             </button>
             <button onClick={() => setTab('requests')} style={sideTab(tab === 'requests')}>
@@ -468,15 +461,37 @@ function App() {
           <Divider />
 
           <div style={listStyle}>
-            {tab === 'chats' && friends.map(f => (
-              <div key={f.id} onClick={() => { handleSelectFriend(f); setShowAiChat(false); }} style={friendItemStyle(selFriend?.id === f.id)}>
-                <Avatar name={f.username} online={f.online} size={42} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 600, fontSize: 13, color: '#0f172a' }}>{f.username}</div>
-                  <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 1 }}>{f.telefone}</div>
+            {tab === 'chats' && (
+              <>
+                {/* Thunderbold_AI - sempre primeiro na lista */}
+                <div onClick={() => handleSelectFriend({ id: 'ai', username: 'Thunderbold_AI', online: true })} style={friendItemStyle(showAiChat)}>
+                  <Avatar name="AI" isAI={true} size={42} online={true} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, fontSize: 13, color: '#0f172a', display: 'flex', alignItems: 'center', gap: 6 }}>
+                      Thunderbold_AI
+                      <span style={{ fontSize: 9, background: '#10b98115', color: '#10b981', padding: '1px 6px', borderRadius: 8, fontWeight: 700 }}>IA</span>
+                    </div>
+                    <div style={{ fontSize: 10, color: '#10b981', marginTop: 1, display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#10b981', boxShadow: '0 0 4px rgba(16,185,129,0.5)' }}/> Online - Sempre disponível
+                    </div>
+                  </div>
+                  <Icons.Bot />
                 </div>
-              </div>
-            ))}
+                
+                {/* Linha separadora sutil */}
+                <div style={{ height: 1, background: '#e5e5e5', margin: '4px 0' }}/>
+                
+                {friends.map(f => (
+                  <div key={f.id} onClick={() => handleSelectFriend(f)} style={friendItemStyle(selFriend?.id === f.id)}>
+                    <Avatar name={f.username} online={f.online} size={42} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, fontSize: 13, color: '#0f172a' }}>{f.username}</div>
+                      <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 1 }}>{f.telefone}</div>
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
             {tab === 'requests' && requests.map(r => (
               <div key={r.id} style={requestItem}>
                 <Avatar name={r.remetente} size={38} />
@@ -501,13 +516,12 @@ function App() {
           {showAiChat ? (
             <>
               <div style={chatHeader}>
-                <div style={{
-                  width: 38, height: 38, borderRadius: 12,
-                  background: 'linear-gradient(135deg, #10b981, #06b6d4)',
-                  color: '#fff', display: 'flex', alignItems: 'center',
-                  justifyContent: 'center', fontSize: 18, flexShrink: 0,
-                  boxShadow: '0 4px 12px rgba(16,185,129,0.3)'
-                }}>🤖</div>
+                {isMobile && (
+                  <button onClick={() => { setShowAiChat(false); setSidebarOpen(true); }} style={iconBtn}>
+                    <Icons.ChevronLeft />
+                  </button>
+                )}
+                <Avatar name="AI" isAI={true} size={38} online={true} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 700, fontSize: 14, color: '#0f172a' }}>Thunderbold_AI</div>
                   <div style={{ fontSize: 10, color: '#10b981', display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -528,12 +542,12 @@ function App() {
                       {m.role === 'user' ? user?.username || 'Você' : 'Thunderbold_AI'}
                       {m.cached && <span style={{ fontSize: 8, marginLeft: 4, opacity: 0.5 }}>(cache)</span>}
                     </div>
-                    {m.content}
+                    <div style={{ whiteSpace: 'pre-wrap' }}>{m.content}</div>
                   </div>
                 ))}
                 {aiLoading && (
-                  <div style={{ alignSelf: 'flex-start', padding: 12, background: '#fff', borderRadius: 14, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
-                    <span style={{ display: 'inline-flex', gap: 3 }}>
+                  <div style={{ alignSelf: 'flex-start', padding: '12px 16px', background: '#fff', borderRadius: 14, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
+                    <span style={{ display: 'inline-flex', gap: 4 }}>
                       <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#06b6d4', animation: 'pulse 1.4s infinite' }}/>
                       <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#06b6d4', animation: 'pulse 1.4s infinite 0.2s' }}/>
                       <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#06b6d4', animation: 'pulse 1.4s infinite 0.4s' }}/>
@@ -548,7 +562,7 @@ function App() {
               <div style={chatInputBar}>
                 <input value={aiInput} onChange={e => setAiInput(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), sendToAI())}
-                  placeholder="Pergunte ao Thunderbold_AI..." style={msgInput}/>
+                  placeholder="Pergunte qualquer coisa..." style={msgInput}/>
                 <button onClick={sendToAI} disabled={!aiInput.trim() || aiLoading} style={sendBtnStyle(!aiInput.trim() || aiLoading)}>
                   <Icons.Send />
                 </button>
@@ -593,15 +607,15 @@ function App() {
             </>
           ) : (
             <div style={emptyChat}>
-              <div style={{ textAlign: 'center', maxWidth: 300 }}>
-                <div style={{ fontSize: 48, marginBottom: 12, opacity: 0.08 }}>💬</div>
+              <div style={{ textAlign: 'center', maxWidth: 320 }}>
+                <div style={{ fontSize: 48, marginBottom: 12, opacity: 0.06 }}>💬</div>
                 <h2 style={{ fontSize: 17, fontWeight: 700, background: 'linear-gradient(135deg, #dc2626, #06b6d4)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', marginBottom: 4 }}>
                   {isMobile ? 'Suas conversas' : 'Seus chats'}
                 </h2>
-                <p style={{ fontSize: 12, color: '#94a3b8', marginBottom: 12 }}>
+                <p style={{ fontSize: 12, color: '#94a3b8', marginBottom: 16 }}>
                   {isMobile ? 'Toque no menu ☰' : 'Escolha um amigo para conversar'}
                 </p>
-                <button onClick={toggleAiChat} style={{
+                <button onClick={openAiChat} style={{
                   padding: '10px 20px', borderRadius: 10,
                   background: 'linear-gradient(135deg, #10b981, #06b6d4)',
                   color: '#fff', border: 'none', cursor: 'pointer',
@@ -629,7 +643,7 @@ function App() {
               <Icons.Users /><span style={{ fontSize: 9 }}>Pedidos</span>
               {requests.length > 0 && <span className="badge-pulse" style={{ position: 'absolute', top: -4, right: 'calc(50% - 20px)', background: '#ef4444', color: '#fff', borderRadius: 10, padding: '3px 7px', fontSize: 9, fontWeight: 800, minWidth: 18, textAlign: 'center', boxShadow: '0 2px 8px rgba(239,68,68,0.4)' }}>{requests.length}</span>}
             </button>
-            <button onClick={toggleAiChat} style={mobileNavBtn}>
+            <button onClick={openAiChat} style={mobileNavBtn}>
               <Icons.Bot /><span style={{ fontSize: 9 }}>IA</span>
             </button>
             <button onClick={() => setShowSearch(true)} style={mobileNavBtn}>
@@ -673,6 +687,7 @@ function App() {
 // ===== ESTILOS =====
 const inp = { width: '100%', padding: '12px 14px', background: '#f0f0f0', border: '2px solid #e5e5e5', borderRadius: 10, fontSize: 16, outline: 'none', color: '#0f172a', marginBottom: 14, boxSizing: 'border-box' };
 const btnStyle = (l) => ({ width: '100%', padding: 13, background: 'linear-gradient(135deg, #dc2626, #06b6d4)', color: '#fff', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: l ? 'not-allowed' : 'pointer', opacity: l ? 0.8 : 1, boxShadow: '0 5px 20px rgba(220,38,38,0.25), 0 2px 10px rgba(6,182,212,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' });
+const spinnerStyle = { display: 'inline-block', width: 18, height: 18, border: '2px solid transparent', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.6s linear infinite', marginRight: 8 };
 const tabBtnStyle = (a) => ({ flex: 1, padding: 10, border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: a ? 700 : 400, background: a ? '#fff' : 'transparent', color: a ? '#dc2626' : '#94a3b8', boxShadow: a ? '0 1px 3px rgba(0,0,0,0.06)' : 'none', transition: 'all 0.2s' });
 const iconBtn = { background: 'transparent', border: 'none', cursor: 'pointer', padding: 6, color: '#334155', display: 'flex', alignItems: 'center' };
 
@@ -687,7 +702,7 @@ const logoutBtnStyle = { padding: '6px 12px', background: 'transparent', border:
 const sidebarStyle = (mob, open) => ({ width: mob ? '100%' : 360, height: '100%', background: '#fff', borderRight: mob ? 'none' : '1px solid #e5e5e5', display: mob && !open ? 'none' : 'flex', flexDirection: 'column', position: mob ? 'absolute' : 'relative', zIndex: 50, flexShrink: 0, boxShadow: mob ? '0 20px 40px rgba(0,0,0,0.15)' : 'none', animation: mob && open ? 'slideIn 0.2s ease' : 'none' });
 const sideTab = (active) => ({ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, padding: '8px 10px', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 11, fontWeight: active ? 700 : 400, background: active ? 'linear-gradient(135deg, #dc2626, #06b6d4)' : 'transparent', color: active ? '#fff' : '#64748b', position: 'relative', transition: 'all 0.15s', boxShadow: active ? '0 3px 10px rgba(220,38,38,0.25)' : 'none' });
 const listStyle = { flex: 1, overflowY: 'auto', padding: '5px 8px', WebkitOverflowScrolling: 'touch' };
-const friendItemStyle = (active) => ({ display: 'flex', alignItems: 'center', gap: 10, padding: 9, borderRadius: 10, cursor: 'pointer', marginBottom: 2, background: active ? '#fef2f2' : 'transparent', border: active ? '1px solid #dc2626' : '1px solid transparent', transition: 'all 0.15s' });
+const friendItemStyle = (active) => ({ display: 'flex', alignItems: 'center', gap: 10, padding: 9, borderRadius: 10, cursor: 'pointer', marginBottom: 2, background: active ? '#f0fdf4' : 'transparent', border: active ? '1px solid #10b981' : '1px solid transparent', transition: 'all 0.15s' });
 const requestItem = { display: 'flex', alignItems: 'center', gap: 8, padding: 9, background: '#f0f0f0', borderRadius: 10, marginBottom: 5, border: '1px solid #e5e5e5' };
 const acceptBtn = { padding: 6, background: '#10b981', border: 'none', borderRadius: 6, color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', boxShadow: '0 2px 8px rgba(16,185,129,0.25)' };
 const rejectBtn = { padding: 6, background: 'transparent', border: '1px solid #dc2626', borderRadius: 6, color: '#dc2626', cursor: 'pointer', display: 'flex', alignItems: 'center' };
